@@ -2,6 +2,10 @@
 
 #include <windows.h>
 
+#ifdef ReplaceFile
+#undef ReplaceFile
+#endif
+
 #include <climits>
 #include <optional>
 
@@ -27,6 +31,12 @@ std::optional<std::wstring> EnvironmentVariable(const wchar_t* name) {
 }  // namespace
 
 std::filesystem::path AppDataDirectory() {
+    if (const auto override_path = EnvironmentVariable(L"CYBERDECK_APPDATA_DIR")) {
+        if (!override_path->empty()) {
+            return *override_path;
+        }
+    }
+
     std::filesystem::path root;
     if (const auto app_data = EnvironmentVariable(L"APPDATA")) {
         root = *app_data;

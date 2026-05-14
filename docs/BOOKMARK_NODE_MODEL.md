@@ -9,6 +9,7 @@ object with fixed key order so later storage code can write stable diffs.
   "id": "node-20260429t034500z-000001",
   "title": "Example Domain",
   "url": "https://www.example.com/",
+  "vaultId": "vault-search",
   "faviconPath": null,
   "shapeType": "hex",
   "colorTheme": "green",
@@ -26,6 +27,8 @@ object with fixed key order so later storage code can write stable diffs.
 - `id`: stable string identifier owned by the bookmark store.
 - `title`: display label; must not be empty.
 - `url`: normalized safe `http` or `https` URL.
+- `vaultId`: optional Deck Vault id. Missing or `null` means the Node is loose
+  and can still render in a flat Deck if no Vaults exist.
 - `faviconPath`: optional local favicon asset path, or `null`.
 - `shapeType`: `hex`, `cube`, or `panel`.
 - `colorTheme`: `green`, `yellow`, `red`, or `mixed`.
@@ -47,6 +50,8 @@ Persistent Nodes live in `%APPDATA%\CyberDeckBrowser\bookmarks.json`:
 {
   "version": 1,
   "defaultsSeeded": true,
+  "vaultsSeeded": true,
+  "vaults": [],
   "nodes": []
 }
 ```
@@ -56,18 +61,31 @@ main file with `MoveFileExW` using write-through semantics. If storage JSON is
 corrupted or contains invalid Nodes, the file is renamed with a timestamped
 `.corrupt.*.bak` suffix and a clean empty `bookmarks.json` is created.
 
-When `bookmarks.json` does not exist yet, the store seeds default Nodes for
-Google, Reddit, GitHub, and ChatGPT. After the file exists, the store treats it
-as user-owned and does not re-seed deleted defaults.
+When `bookmarks.json` does not exist yet, the store seeds default Deck Vaults:
+Search Array, AI Core, News Wire, Code Forge, and Media Bay. It also seeds
+19 default Nodes across those Vaults, including search, news, code, AI, and
+media starting points. After the file exists, the store treats it as user-owned
+and does not re-seed deleted defaults.
+
+Vaults are first-class containers, not OS-style folders. A Vault has `id`,
+`name`, `colorTheme`, `createdUtc`, and `updatedUtc`. Renaming a Vault updates
+only the Vault metadata. Deleting a Vault keeps its Nodes by moving them to the
+next available Vault, or leaving them loose if no Vaults remain.
 
 The `ADD NODE` toolbar action creates a v1 Node from the active tab title and
 URL, using a hex shape and mixed green/yellow color by default. Duplicate URLs
 prompt before changing storage: update the existing Node title, create a
 separate duplicate Node, or cancel.
 
-Deck Space renders saved Nodes with the v1 Hex Ring layout. The first Node is
-the selected/front Node, scaled larger and rendered brightest. Empty storage
-shows `NO NODES FOUND` and `VISIT A SITE AND PRESS ADD NODE`.
+Deck Space renders Vaults first when Vaults exist. The Vault Atlas shows a
+large glowing selected Vault in the center, a larger outer ring for all Vault
+slots, and a small selected-slot marker so the user can see where the centered
+Vault belongs in the circle. `Enter` or double click flies into the selected
+Vault. Inside a Vault, saved Nodes use the same Hex Ring, Cube Orbit, and Grid
+Deck layouts as the original flat Deck. Mouse wheel or left/right arrows rotate
+selection, `+`/`-` zooms the camera, and right click, Backspace, or Escape
+leaves the Vault and returns to the Atlas. Empty Vaults show a prompt to add the
+active site as a Node.
 
 Users can hover a Node to highlight it and show its title/URL panel, click to
 select it, use left/right arrows to move selection through the ring, and open

@@ -12,6 +12,8 @@ must be updated with:
 - Official source URL.
 - License name and license text or required notice location.
 - Whether the component is bundled, generated, or installed externally.
+- For CEF/Chromium builds, the exact codec-related build flags used for the
+  distributed binary.
 - Any attribution, redistribution, source-availability, or commercial-use
   requirements.
 

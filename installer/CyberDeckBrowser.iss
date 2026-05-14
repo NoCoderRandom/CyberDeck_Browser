@@ -1,5 +1,7 @@
 #define MyAppName "CyberDeck Browser"
+#ifndef MyAppVersion
 #define MyAppVersion "0.1.0"
+#endif
 #define MyAppPublisher "CyberDeck Browser"
 #define MyAppExeName "CyberDeckBrowser.exe"
 

@@ -404,6 +404,18 @@ std::optional<bool> BoolField(const JsonValue::Object& object, std::string_view 
     return *value;
 }
 
+const std::string* StringField(const JsonValue::Object& object, std::string_view key) {
+    const auto found = object.find(std::string(key));
+    if (found == object.end()) {
+        return nullptr;
+    }
+    return std::get_if<std::string>(&found->second.value);
+}
+
+std::string EscapeJsonWideString(const std::wstring& value) {
+    return EscapeJsonString(WideToUtf8(value));
+}
+
 void WriteJsonValue(std::ostream& output, const JsonValue& value) {
     if (std::holds_alternative<std::nullptr_t>(value.value)) {
         output << "null";
@@ -463,6 +475,16 @@ bool HasDuplicateIds(const std::vector<BookmarkNode>& nodes) {
     return false;
 }
 
+bool HasDuplicateVaultIds(const std::vector<BookmarkVault>& vaults) {
+    std::set<std::wstring> ids;
+    for (const BookmarkVault& vault : vaults) {
+        if (!ids.insert(vault.id).second) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool AreValidNodes(const std::vector<BookmarkNode>& nodes) {
     if (HasDuplicateIds(nodes)) {
         return false;
@@ -473,10 +495,53 @@ bool AreValidNodes(const std::vector<BookmarkNode>& nodes) {
     });
 }
 
+bool IsValidVault(const BookmarkVault& vault) {
+    return !vault.id.empty() && !vault.name.empty() && !vault.created_utc.empty() && !vault.updated_utc.empty();
+}
+
+bool AreValidVaults(const std::vector<BookmarkVault>& vaults) {
+    if (HasDuplicateVaultIds(vaults)) {
+        return false;
+    }
+
+    return std::all_of(vaults.begin(), vaults.end(), IsValidVault);
+}
+
+std::set<std::wstring> VaultIdSet(const std::vector<BookmarkVault>& vaults) {
+    std::set<std::wstring> ids;
+    for (const BookmarkVault& vault : vaults) {
+        ids.insert(vault.id);
+    }
+    return ids;
+}
+
+bool VaultIdExists(const std::vector<BookmarkVault>& vaults, const std::wstring& id) {
+    return std::any_of(vaults.begin(), vaults.end(), [&id](const BookmarkVault& vault) {
+        return vault.id == id;
+    });
+}
+
+bool NodesReferenceKnownVaults(const std::vector<BookmarkNode>& nodes, const std::vector<BookmarkVault>& vaults) {
+    const std::set<std::wstring> known_vaults = VaultIdSet(vaults);
+    return std::all_of(nodes.begin(), nodes.end(), [&known_vaults](const BookmarkNode& node) {
+        return !node.vault_id || known_vaults.find(*node.vault_id) != known_vaults.end();
+    });
+}
+
+void ClearUnknownVaultReferences(std::vector<BookmarkNode>& nodes, const std::vector<BookmarkVault>& vaults) {
+    const std::set<std::wstring> known_vaults = VaultIdSet(vaults);
+    for (BookmarkNode& node : nodes) {
+        if (node.vault_id && known_vaults.find(*node.vault_id) == known_vaults.end()) {
+            node.vault_id.reset();
+        }
+    }
+}
+
 BookmarkNode MakeDefaultBookmark(
     std::wstring id,
     std::wstring title,
     std::wstring url,
+    std::optional<std::wstring> vault_id,
     BookmarkNodeShapeType shape_type,
     BookmarkNodeColorTheme color_theme,
     BookmarkNodePosition deck_position,
@@ -486,6 +551,7 @@ BookmarkNode MakeDefaultBookmark(
     node.id = std::move(id);
     node.title = std::move(title);
     node.url = std::move(url);
+    node.vault_id = std::move(vault_id);
     node.shape_type = shape_type;
     node.color_theme = color_theme;
     node.created_utc = timestamp;
@@ -496,6 +562,31 @@ BookmarkNode MakeDefaultBookmark(
     return node;
 }
 
+BookmarkVault MakeDefaultVault(
+    std::wstring id,
+    std::wstring name,
+    BookmarkNodeColorTheme color_theme,
+    const std::string& timestamp) {
+    BookmarkVault vault;
+    vault.id = std::move(id);
+    vault.name = std::move(name);
+    vault.color_theme = color_theme;
+    vault.created_utc = timestamp;
+    vault.updated_utc = timestamp;
+    return vault;
+}
+
+std::vector<BookmarkVault> CreateDefaultVaults() {
+    const std::string timestamp = CurrentBookmarkNodeUtcTimestamp();
+    return {
+        MakeDefaultVault(L"vault-search", L"Search Array", BookmarkNodeColorTheme::Green, timestamp),
+        MakeDefaultVault(L"vault-ai", L"AI Core", BookmarkNodeColorTheme::Mixed, timestamp),
+        MakeDefaultVault(L"vault-news", L"News Wire", BookmarkNodeColorTheme::Red, timestamp),
+        MakeDefaultVault(L"vault-code", L"Code Forge", BookmarkNodeColorTheme::Yellow, timestamp),
+        MakeDefaultVault(L"vault-media", L"Media Bay", BookmarkNodeColorTheme::Green, timestamp),
+    };
+}
+
 std::vector<BookmarkNode> CreateDefaultBookmarks() {
     const std::string timestamp = CurrentBookmarkNodeUtcTimestamp();
     return {
@@ -503,39 +594,237 @@ std::vector<BookmarkNode> CreateDefaultBookmarks() {
             L"default-google",
             L"Google",
             L"https://www.google.com",
+            L"vault-search",
             BookmarkNodeShapeType::Hex,
             BookmarkNodeColorTheme::Green,
             BookmarkNodePosition{.x = -1.8f, .y = 0.05f, .z = 0.15f},
             {L"default", L"search"},
             timestamp),
         MakeDefaultBookmark(
+            L"default-duckduckgo",
+            L"DuckDuckGo",
+            L"https://duckduckgo.com",
+            L"vault-search",
+            BookmarkNodeShapeType::Cube,
+            BookmarkNodeColorTheme::Green,
+            BookmarkNodePosition{.x = -0.9f, .y = 0.02f, .z = -0.2f},
+            {L"default", L"search", L"privacy"},
+            timestamp),
+        MakeDefaultBookmark(
+            L"default-wikipedia",
+            L"Wikipedia",
+            L"https://www.wikipedia.org",
+            L"vault-search",
+            BookmarkNodeShapeType::Panel,
+            BookmarkNodeColorTheme::Yellow,
+            BookmarkNodePosition{.x = 0.8f, .y = 0.0f, .z = -0.15f},
+            {L"default", L"knowledge"},
+            timestamp),
+        MakeDefaultBookmark(
+            L"default-perplexity",
+            L"Perplexity",
+            L"https://www.perplexity.ai",
+            L"vault-search",
+            BookmarkNodeShapeType::Hex,
+            BookmarkNodeColorTheme::Mixed,
+            BookmarkNodePosition{.x = 1.65f, .y = 0.05f, .z = 0.25f},
+            {L"default", L"search", L"ai"},
+            timestamp),
+        MakeDefaultBookmark(
             L"default-reddit",
             L"Reddit",
             L"https://www.reddit.com",
+            L"vault-news",
             BookmarkNodeShapeType::Panel,
             BookmarkNodeColorTheme::Red,
             BookmarkNodePosition{.x = -0.6f, .y = 0.0f, .z = -0.35f},
             {L"default", L"community"},
             timestamp),
         MakeDefaultBookmark(
+            L"default-hacker-news",
+            L"Hacker News",
+            L"https://news.ycombinator.com",
+            L"vault-news",
+            BookmarkNodeShapeType::Hex,
+            BookmarkNodeColorTheme::Yellow,
+            BookmarkNodePosition{.x = -1.3f, .y = 0.02f, .z = 0.15f},
+            {L"default", L"news", L"tech"},
+            timestamp),
+        MakeDefaultBookmark(
+            L"default-bbc",
+            L"BBC News",
+            L"https://www.bbc.com/news",
+            L"vault-news",
+            BookmarkNodeShapeType::Panel,
+            BookmarkNodeColorTheme::Green,
+            BookmarkNodePosition{.x = 0.45f, .y = 0.0f, .z = -0.1f},
+            {L"default", L"news"},
+            timestamp),
+        MakeDefaultBookmark(
+            L"default-the-verge",
+            L"The Verge",
+            L"https://www.theverge.com",
+            L"vault-news",
+            BookmarkNodeShapeType::Cube,
+            BookmarkNodeColorTheme::Mixed,
+            BookmarkNodePosition{.x = 1.35f, .y = 0.04f, .z = 0.2f},
+            {L"default", L"news", L"tech"},
+            timestamp),
+        MakeDefaultBookmark(
             L"default-github",
             L"GitHub",
             L"https://github.com",
+            L"vault-code",
             BookmarkNodeShapeType::Cube,
             BookmarkNodeColorTheme::Yellow,
             BookmarkNodePosition{.x = 0.6f, .y = 0.0f, .z = -0.35f},
             {L"default", L"code"},
             timestamp),
         MakeDefaultBookmark(
+            L"default-stack-overflow",
+            L"Stack Overflow",
+            L"https://stackoverflow.com",
+            L"vault-code",
+            BookmarkNodeShapeType::Panel,
+            BookmarkNodeColorTheme::Yellow,
+            BookmarkNodePosition{.x = -1.1f, .y = 0.02f, .z = 0.1f},
+            {L"default", L"code", L"help"},
+            timestamp),
+        MakeDefaultBookmark(
+            L"default-mdn",
+            L"MDN Web Docs",
+            L"https://developer.mozilla.org",
+            L"vault-code",
+            BookmarkNodeShapeType::Hex,
+            BookmarkNodeColorTheme::Green,
+            BookmarkNodePosition{.x = 0.0f, .y = 0.0f, .z = -0.18f},
+            {L"default", L"docs", L"web"},
+            timestamp),
+        MakeDefaultBookmark(
+            L"default-cppreference",
+            L"cppreference",
+            L"https://en.cppreference.com",
+            L"vault-code",
+            BookmarkNodeShapeType::Cube,
+            BookmarkNodeColorTheme::Mixed,
+            BookmarkNodePosition{.x = 1.15f, .y = 0.04f, .z = 0.12f},
+            {L"default", L"docs", L"cpp"},
+            timestamp),
+        MakeDefaultBookmark(
             L"default-chatgpt",
             L"ChatGPT",
             L"https://chatgpt.com",
+            L"vault-ai",
             BookmarkNodeShapeType::Hex,
             BookmarkNodeColorTheme::Mixed,
             BookmarkNodePosition{.x = 1.8f, .y = 0.05f, .z = 0.15f},
             {L"default", L"ai"},
             timestamp),
+        MakeDefaultBookmark(
+            L"default-claude",
+            L"Claude",
+            L"https://claude.ai",
+            L"vault-ai",
+            BookmarkNodeShapeType::Cube,
+            BookmarkNodeColorTheme::Yellow,
+            BookmarkNodePosition{.x = -1.2f, .y = 0.02f, .z = 0.12f},
+            {L"default", L"ai"},
+            timestamp),
+        MakeDefaultBookmark(
+            L"default-gemini",
+            L"Gemini",
+            L"https://gemini.google.com",
+            L"vault-ai",
+            BookmarkNodeShapeType::Panel,
+            BookmarkNodeColorTheme::Green,
+            BookmarkNodePosition{.x = 0.0f, .y = 0.0f, .z = -0.2f},
+            {L"default", L"ai"},
+            timestamp),
+        MakeDefaultBookmark(
+            L"default-copilot",
+            L"Microsoft Copilot",
+            L"https://copilot.microsoft.com",
+            L"vault-ai",
+            BookmarkNodeShapeType::Hex,
+            BookmarkNodeColorTheme::Mixed,
+            BookmarkNodePosition{.x = 1.25f, .y = 0.04f, .z = 0.18f},
+            {L"default", L"ai"},
+            timestamp),
+        MakeDefaultBookmark(
+            L"default-youtube",
+            L"YouTube",
+            L"https://www.youtube.com",
+            L"vault-media",
+            BookmarkNodeShapeType::Hex,
+            BookmarkNodeColorTheme::Red,
+            BookmarkNodePosition{.x = -1.35f, .y = 0.02f, .z = 0.16f},
+            {L"default", L"media", L"video"},
+            timestamp),
+        MakeDefaultBookmark(
+            L"default-twitch",
+            L"Twitch",
+            L"https://www.twitch.tv",
+            L"vault-media",
+            BookmarkNodeShapeType::Cube,
+            BookmarkNodeColorTheme::Mixed,
+            BookmarkNodePosition{.x = 0.0f, .y = 0.0f, .z = -0.2f},
+            {L"default", L"media", L"streaming"},
+            timestamp),
+        MakeDefaultBookmark(
+            L"default-spotify",
+            L"Spotify",
+            L"https://open.spotify.com",
+            L"vault-media",
+            BookmarkNodeShapeType::Panel,
+            BookmarkNodeColorTheme::Green,
+            BookmarkNodePosition{.x = 1.25f, .y = 0.04f, .z = 0.18f},
+            {L"default", L"media", L"music"},
+            timestamp),
     };
+}
+
+std::string BookmarkVaultToJson(const BookmarkVault& vault) {
+    std::ostringstream output;
+    output << "{\n";
+    output << "  \"version\": 1,\n";
+    output << "  \"id\": \"" << EscapeJsonWideString(vault.id) << "\",\n";
+    output << "  \"name\": \"" << EscapeJsonWideString(vault.name) << "\",\n";
+    output << "  \"colorTheme\": \"" << ToJsonString(vault.color_theme) << "\",\n";
+    output << "  \"createdUtc\": \"" << EscapeJsonString(vault.created_utc) << "\",\n";
+    output << "  \"updatedUtc\": \"" << EscapeJsonString(vault.updated_utc) << "\"\n";
+    output << "}\n";
+    return output.str();
+}
+
+std::optional<BookmarkVault> BookmarkVaultFromJson(const JsonValue& value) {
+    const JsonValue::Object* object = AsObject(value);
+    if (object == nullptr) {
+        return std::nullopt;
+    }
+
+    const std::optional<int> version = IntField(*object, "version");
+    const std::string* id = StringField(*object, "id");
+    const std::string* name = StringField(*object, "name");
+    const std::string* color = StringField(*object, "colorTheme");
+    const std::string* created = StringField(*object, "createdUtc");
+    const std::string* updated = StringField(*object, "updatedUtc");
+    if (!version || *version != 1 || id == nullptr || name == nullptr || color == nullptr || created == nullptr ||
+        updated == nullptr) {
+        return std::nullopt;
+    }
+
+    const std::optional<BookmarkNodeColorTheme> color_theme = BookmarkNodeColorThemeFromString(*color);
+    if (!color_theme) {
+        return std::nullopt;
+    }
+
+    BookmarkVault vault;
+    vault.id = Utf8ToWide(*id);
+    vault.name = Utf8ToWide(*name);
+    vault.color_theme = *color_theme;
+    vault.created_utc = *created;
+    vault.updated_utc = *updated;
+    return IsValidVault(vault) ? std::optional<BookmarkVault>{std::move(vault)} : std::nullopt;
 }
 
 }  // namespace
@@ -549,7 +838,9 @@ bool BookmarkStore::Initialize(std::filesystem::path bookmarks_path, common::Log
     logger_ = &logger;
     bookmarks_path_ = std::move(bookmarks_path);
     nodes_.clear();
+    vaults_.clear();
     defaults_seeded_ = false;
+    vaults_seeded_ = false;
 
     if (!LoadLocked()) {
         if (!RenameCorruptedFileLocked()) {
@@ -557,7 +848,9 @@ bool BookmarkStore::Initialize(std::filesystem::path bookmarks_path, common::Log
             return false;
         }
         nodes_.clear();
+        vaults_.clear();
         defaults_seeded_ = true;
+        vaults_seeded_ = true;
         if (!WriteLocked()) {
             logger_->Error("Unable to write clean bookmark file after corruption recovery.");
             return false;
@@ -573,6 +866,11 @@ std::vector<BookmarkNode> BookmarkStore::LoadBookmarks() const {
     return nodes_;
 }
 
+std::vector<BookmarkVault> BookmarkStore::LoadVaults() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return vaults_;
+}
+
 bool BookmarkStore::SaveBookmarks(std::vector<BookmarkNode> nodes) {
     if (!AreValidNodes(nodes)) {
         return false;
@@ -580,6 +878,9 @@ bool BookmarkStore::SaveBookmarks(std::vector<BookmarkNode> nodes) {
 
     std::lock_guard<std::mutex> lock(mutex_);
     if (bookmarks_path_.empty() || logger_ == nullptr) {
+        return false;
+    }
+    if (!NodesReferenceKnownVaults(nodes, vaults_)) {
         return false;
     }
 
@@ -592,6 +893,30 @@ bool BookmarkStore::SaveBookmarks(std::vector<BookmarkNode> nodes) {
     return written;
 }
 
+bool BookmarkStore::SaveVaults(std::vector<BookmarkVault> vaults) {
+    if (!AreValidVaults(vaults)) {
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (bookmarks_path_.empty() || logger_ == nullptr) {
+        return false;
+    }
+
+    std::vector<BookmarkNode> previous_nodes = nodes_;
+    std::vector<BookmarkVault> previous_vaults = vaults_;
+    ClearUnknownVaultReferences(nodes_, vaults);
+    vaults_ = std::move(vaults);
+    vaults_seeded_ = true;
+    const bool written = WriteLocked();
+    if (!written) {
+        nodes_ = std::move(previous_nodes);
+        vaults_ = std::move(previous_vaults);
+        logger_->Error("Failed to write Vaults.");
+    }
+    return written;
+}
+
 bool BookmarkStore::AddBookmark(BookmarkNode node) {
     if (!ValidateBookmarkNode(node).valid) {
         return false;
@@ -599,6 +924,9 @@ bool BookmarkStore::AddBookmark(BookmarkNode node) {
 
     std::lock_guard<std::mutex> lock(mutex_);
     if (bookmarks_path_.empty() || logger_ == nullptr) {
+        return false;
+    }
+    if (node.vault_id && !VaultIdExists(vaults_, *node.vault_id)) {
         return false;
     }
 
@@ -626,6 +954,9 @@ bool BookmarkStore::UpdateBookmark(BookmarkNode node) {
 
     std::lock_guard<std::mutex> lock(mutex_);
     if (bookmarks_path_.empty() || logger_ == nullptr) {
+        return false;
+    }
+    if (node.vault_id && !VaultIdExists(vaults_, *node.vault_id)) {
         return false;
     }
 
@@ -672,6 +1003,67 @@ bool BookmarkStore::DeleteBookmark(std::wstring_view id) {
     return written;
 }
 
+bool BookmarkStore::UpdateVault(BookmarkVault vault) {
+    if (!IsValidVault(vault)) {
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (bookmarks_path_.empty() || logger_ == nullptr) {
+        return false;
+    }
+
+    auto found = std::find_if(vaults_.begin(), vaults_.end(), [&vault](const BookmarkVault& existing) {
+        return existing.id == vault.id;
+    });
+    if (found == vaults_.end()) {
+        return false;
+    }
+
+    BookmarkVault previous = *found;
+    *found = std::move(vault);
+    vaults_seeded_ = true;
+    const bool written = WriteLocked();
+    if (!written) {
+        *found = std::move(previous);
+        logger_->Error("Failed to write updated Vault.");
+    }
+    return written;
+}
+
+bool BookmarkStore::DeleteVault(std::wstring_view id) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (bookmarks_path_.empty() || logger_ == nullptr || id.empty()) {
+        return false;
+    }
+
+    auto found = std::find_if(vaults_.begin(), vaults_.end(), [id](const BookmarkVault& vault) {
+        return vault.id == id;
+    });
+    if (found == vaults_.end()) {
+        return false;
+    }
+
+    std::vector<BookmarkNode> previous_nodes = nodes_;
+    BookmarkVault removed = std::move(*found);
+    const auto index = static_cast<std::size_t>(std::distance(vaults_.begin(), found));
+    vaults_.erase(found);
+    const std::optional<std::wstring> fallback_vault_id = vaults_.empty() ? std::nullopt : std::optional<std::wstring>{vaults_.front().id};
+    for (BookmarkNode& node : nodes_) {
+        if (node.vault_id && *node.vault_id == id) {
+            node.vault_id = fallback_vault_id;
+        }
+    }
+    vaults_seeded_ = true;
+    const bool written = WriteLocked();
+    if (!written) {
+        vaults_.insert(vaults_.begin() + static_cast<std::ptrdiff_t>(index), std::move(removed));
+        nodes_ = std::move(previous_nodes);
+        logger_->Error("Failed to write deleted Vault.");
+    }
+    return written;
+}
+
 std::optional<BookmarkNode> BookmarkStore::FindBookmarkById(std::wstring_view id) const {
     std::lock_guard<std::mutex> lock(mutex_);
     const auto found = std::find_if(nodes_.begin(), nodes_.end(), [id](const BookmarkNode& node) {
@@ -702,19 +1094,25 @@ bool BookmarkStore::LoadLocked() {
 
     std::error_code error;
     if (!std::filesystem::exists(bookmarks_path_, error)) {
+        vaults_ = CreateDefaultVaults();
         nodes_ = CreateDefaultBookmarks();
         defaults_seeded_ = true;
+        vaults_seeded_ = true;
         return WriteLocked();
     }
 
-    std::ifstream input(bookmarks_path_, std::ios::binary);
-    if (!input.is_open()) {
-        return fail("could not open file");
+    std::string json_text;
+    {
+        std::ifstream input(bookmarks_path_, std::ios::binary);
+        if (!input.is_open()) {
+            return fail("could not open file");
+        }
+
+        std::ostringstream buffer;
+        buffer << input.rdbuf();
+        json_text = buffer.str();
     }
 
-    std::ostringstream buffer;
-    buffer << input.rdbuf();
-    const std::string json_text = buffer.str();
     JsonParser parser(json_text);
     const auto root_value = parser.Parse();
     if (!root_value) {
@@ -734,6 +1132,7 @@ bool BookmarkStore::LoadLocked() {
         return fail("version field is missing or unsupported");
     }
     const std::optional<bool> defaults_seeded = BoolField(*root, "defaultsSeeded");
+    const std::optional<bool> vaults_seeded = BoolField(*root, "vaultsSeeded");
 
     const auto nodes_found = root->find("nodes");
     if (nodes_found == root->end()) {
@@ -764,21 +1163,62 @@ bool BookmarkStore::LoadLocked() {
         return fail("node ids are not unique");
     }
 
+    std::vector<BookmarkVault> loaded_vaults;
+    const auto vaults_found = root->find("vaults");
+    if (vaults_found != root->end()) {
+        const JsonValue::Array* vaults = AsArray(vaults_found->second);
+        if (vaults == nullptr) {
+            return fail("vaults field is not an array");
+        }
+
+        loaded_vaults.reserve(vaults->size());
+        for (const JsonValue& item : *vaults) {
+            auto vault = BookmarkVaultFromJson(item);
+            if (!vault) {
+                return fail("Vault entry is invalid");
+            }
+            loaded_vaults.push_back(std::move(*vault));
+        }
+        if (!AreValidVaults(loaded_vaults)) {
+            return fail("Vault ids are not unique or valid");
+        }
+    }
+
+    bool should_write = false;
+    vaults_seeded_ = vaults_seeded.value_or(false);
+    if (loaded_vaults.empty() && !vaults_seeded_) {
+        loaded_vaults = CreateDefaultVaults();
+        vaults_seeded_ = true;
+        should_write = true;
+    }
+
     nodes_ = std::move(loaded);
+    vaults_ = std::move(loaded_vaults);
     defaults_seeded_ = defaults_seeded.value_or(false);
     if (nodes_.empty() && !defaults_seeded_) {
         nodes_ = CreateDefaultBookmarks();
         defaults_seeded_ = true;
-        return WriteLocked();
+        should_write = true;
+    }
+    const std::vector<BookmarkNode> before_vault_cleanup = nodes_;
+    ClearUnknownVaultReferences(nodes_, vaults_);
+    for (std::size_t index = 0; index < nodes_.size(); ++index) {
+        if (nodes_[index].vault_id != before_vault_cleanup[index].vault_id) {
+            should_write = true;
+            break;
+        }
     }
     if (!nodes_.empty()) {
         defaults_seeded_ = true;
     }
-    return true;
+    if (!vaults_.empty()) {
+        vaults_seeded_ = true;
+    }
+    return should_write ? WriteLocked() : true;
 }
 
 bool BookmarkStore::WriteLocked() {
-    if (!AreValidNodes(nodes_)) {
+    if (!AreValidNodes(nodes_) || !AreValidVaults(vaults_) || !NodesReferenceKnownVaults(nodes_, vaults_)) {
         return false;
     }
 
@@ -798,6 +1238,13 @@ bool BookmarkStore::WriteLocked() {
         output << "{\n";
         output << "  \"version\": 1,\n";
         output << "  \"defaultsSeeded\": " << (defaults_seeded_ ? "true" : "false") << ",\n";
+        output << "  \"vaultsSeeded\": " << (vaults_seeded_ ? "true" : "false") << ",\n";
+        output << "  \"vaults\": [\n";
+        for (std::size_t index = 0; index < vaults_.size(); ++index) {
+            output << IndentJson(BookmarkVaultToJson(vaults_[index]), "    ");
+            output << (index + 1 == vaults_.size() ? "" : ",") << "\n";
+        }
+        output << "  ],\n";
         output << "  \"nodes\": [\n";
         for (std::size_t index = 0; index < nodes_.size(); ++index) {
             output << IndentJson(BookmarkNodeToJson(nodes_[index]), "    ");

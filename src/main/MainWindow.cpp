@@ -15,28 +15,28 @@ namespace cyberdeck::main {
 namespace {
 
 constexpr wchar_t kWindowClassName[] = L"CyberDeckBrowserMainWindow";
-constexpr int kInitialWidth = 1280;
+constexpr int kInitialWidth = 1500;
 constexpr int kInitialHeight = 800;
-constexpr int kMinimumWidth = 1100;
-constexpr int kMinimumHeight = 700;
-constexpr int kToolbarHeight = 48;
-constexpr int kTabStripHeight = 36;
-constexpr int kToolbarMargin = 8;
-constexpr int kToolbarGap = 6;
-constexpr int kButtonWidth = 64;
-constexpr int kTerminalButtonWidth = 72;
-constexpr int kEffectButtonWidth = 58;
-constexpr int kSettingsButtonWidth = 52;
-constexpr int kDeckButtonWidth = 64;
-constexpr int kAddNodeButtonWidth = 92;
-constexpr int kGoButtonWidth = 52;
-constexpr int kControlHeight = 30;
-constexpr int kUrlMinimumWidth = 200;
-constexpr int kTabWidth = 190;
-constexpr int kTabHeight = 28;
-constexpr int kTabTop = kToolbarHeight + 4;
-constexpr int kTabCloseSize = 18;
-constexpr int kNewTabWidth = 34;
+constexpr int kMinimumWidth = 1320;
+constexpr int kMinimumHeight = 760;
+constexpr int kToolbarHeight = 74;
+constexpr int kTabStripHeight = 52;
+constexpr int kToolbarMargin = 12;
+constexpr int kToolbarGap = 7;
+constexpr int kButtonWidth = 76;
+constexpr int kTerminalButtonWidth = 90;
+constexpr int kEffectButtonWidth = 72;
+constexpr int kSettingsButtonWidth = 68;
+constexpr int kDeckButtonWidth = 78;
+constexpr int kAddNodeButtonWidth = 120;
+constexpr int kGoButtonWidth = 68;
+constexpr int kControlHeight = 46;
+constexpr int kUrlMinimumWidth = 260;
+constexpr int kTabWidth = 250;
+constexpr int kTabHeight = 40;
+constexpr int kTabTop = kToolbarHeight + 6;
+constexpr int kTabCloseSize = 24;
+constexpr int kNewTabWidth = 48;
 constexpr UINT_PTR kLoadingTimerId = 1;
 constexpr UINT kLoadingTimerMs = 160;
 constexpr UINT kApplyTabsMessage = WM_APP + 1;
@@ -68,6 +68,31 @@ enum ToolbarCommand : int {
     kCommandAddNode = 1014,
     kCommandTabBase = 20000,
     kCommandCloseTabBase = 21000,
+};
+
+class ScopedSelectObject {
+public:
+    ScopedSelectObject(HDC dc, HGDIOBJ object) : dc_(dc) {
+        if (dc_ != nullptr && object != nullptr) {
+            HGDIOBJ selected = SelectObject(dc_, object);
+            if (selected != nullptr && selected != HGDI_ERROR) {
+                previous_ = selected;
+            }
+        }
+    }
+
+    ~ScopedSelectObject() {
+        if (dc_ != nullptr && previous_ != nullptr) {
+            SelectObject(dc_, previous_);
+        }
+    }
+
+    ScopedSelectObject(const ScopedSelectObject&) = delete;
+    ScopedSelectObject& operator=(const ScopedSelectObject&) = delete;
+
+private:
+    HDC dc_ = nullptr;
+    HGDIOBJ previous_ = nullptr;
 };
 
 std::wstring_view ButtonLabel(int control_id) {
@@ -137,7 +162,7 @@ std::wstring CompactTabTitle(const UiTabState& tab) {
         title = L"New Tab";
     }
 
-    constexpr std::size_t kMaximumTitleLength = 18;
+    constexpr std::size_t kMaximumTitleLength = 22;
     if (title.size() > kMaximumTitleLength) {
         title.resize(kMaximumTitleLength - 3);
         title += L"...";
@@ -631,7 +656,7 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM w_param, LPARAM l_param) 
 }
 
 bool MainWindow::CreateToolbarControls(HINSTANCE instance) {
-    toolbar_font_ = cyberdeck::ui::CreateMonospaceFont(17);
+    toolbar_font_ = cyberdeck::ui::CreateMonospaceFont(24, FW_SEMIBOLD);
 
     edit_background_brush_ = CreateSolidBrush(kBlack);
     if (toolbar_font_ == nullptr || edit_background_brush_ == nullptr) {
@@ -995,6 +1020,7 @@ void MainWindow::DrawToolbarButton(const DRAWITEMSTRUCT& draw_item) {
     const bool disabled = (draw_item.itemState & ODS_DISABLED) != 0;
     const COLORREF accent = ButtonAccent(control_id);
     const RECT rect = draw_item.rcItem;
+    ScopedSelectObject selected_font(draw_item.hDC, toolbar_font_);
 
     if (control_id == kCommandNewTab) {
         Fill(draw_item.hDC, rect, pressed ? RGB(18, 16, 0) : RGB(0, 14, 8));
@@ -1140,6 +1166,7 @@ void MainWindow::Paint() {
 
     RECT client{};
     GetClientRect(hwnd_, &client);
+    ScopedSelectObject selected_font(dc, toolbar_font_);
 
     const int width = client.right - client.left;
     const int tab_strip_bottom = kToolbarHeight + kTabStripHeight;
@@ -1218,7 +1245,7 @@ void MainWindow::Paint() {
             DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     }
 
-    HFONT font = cyberdeck::ui::CreateMonospaceFont(20);
+    HFONT font = cyberdeck::ui::CreateMonospaceFont(24, FW_SEMIBOLD);
 
     HGDIOBJ previous_font = nullptr;
     if (font != nullptr) {

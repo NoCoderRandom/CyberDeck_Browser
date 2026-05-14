@@ -28,10 +28,19 @@ struct BookmarkNodePosition {
     float z = 0.0f;
 };
 
+struct BookmarkVault {
+    std::wstring id;
+    std::wstring name;
+    BookmarkNodeColorTheme color_theme = BookmarkNodeColorTheme::Green;
+    std::string created_utc;
+    std::string updated_utc;
+};
+
 struct BookmarkNode {
     std::wstring id;
     std::wstring title;
     std::wstring url;
+    std::optional<std::wstring> vault_id;
     std::optional<std::wstring> favicon_path;
     BookmarkNodeShapeType shape_type = BookmarkNodeShapeType::Hex;
     BookmarkNodeColorTheme color_theme = BookmarkNodeColorTheme::Green;

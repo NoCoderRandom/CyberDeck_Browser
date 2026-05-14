@@ -106,6 +106,20 @@ constexpr int kNodeEditShape = 1103;
 constexpr int kNodeEditColor = 1104;
 constexpr int kNodeEditSave = 1105;
 constexpr int kNodeEditCancel = 1106;
+constexpr wchar_t kVaultEditDialogClassName[] = L"CyberDeckVaultEditDialog";
+constexpr int kVaultEditName = 1201;
+constexpr int kVaultEditColor = 1202;
+constexpr int kVaultEditSave = 1203;
+constexpr int kVaultEditCancel = 1204;
+
+struct VaultEditDialogData {
+    deck::BookmarkVault vault;
+    bool saved = false;
+    HFONT font = nullptr;
+    HBRUSH background = nullptr;
+    HWND name_edit = nullptr;
+    HWND color_combo = nullptr;
+};
 
 int ShapeIndex(deck::BookmarkNodeShapeType shape) {
     switch (shape) {
@@ -426,10 +440,221 @@ std::optional<deck::BookmarkNode> ShowNodeEditDialog(HWND owner, deck::BookmarkN
     return data.saved ? std::optional<deck::BookmarkNode>{data.node} : std::nullopt;
 }
 
+LRESULT CALLBACK VaultEditDialogProc(HWND hwnd, UINT message, WPARAM w_param, LPARAM l_param) {
+    auto* data = reinterpret_cast<VaultEditDialogData*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+
+    switch (message) {
+        case WM_NCCREATE: {
+            const auto* create = reinterpret_cast<CREATESTRUCTW*>(l_param);
+            data = static_cast<VaultEditDialogData*>(create->lpCreateParams);
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(data));
+            return TRUE;
+        }
+        case WM_CREATE: {
+            if (data == nullptr) {
+                return -1;
+            }
+            data->font = CreateFontW(
+                -16,
+                0,
+                0,
+                0,
+                FW_MEDIUM,
+                FALSE,
+                FALSE,
+                FALSE,
+                DEFAULT_CHARSET,
+                OUT_DEFAULT_PRECIS,
+                CLIP_DEFAULT_PRECIS,
+                CLEARTYPE_QUALITY,
+                FIXED_PITCH | FF_MODERN,
+                L"Cascadia Mono");
+            if (data->font == nullptr) {
+                data->font = CreateFontW(
+                    -16,
+                    0,
+                    0,
+                    0,
+                    FW_MEDIUM,
+                    FALSE,
+                    FALSE,
+                    FALSE,
+                    DEFAULT_CHARSET,
+                    OUT_DEFAULT_PRECIS,
+                    CLIP_DEFAULT_PRECIS,
+                    CLEARTYPE_QUALITY,
+                    FIXED_PITCH | FF_MODERN,
+                    L"Consolas");
+            }
+            data->background = CreateSolidBrush(RGB(0, 0, 0));
+
+            CreateDialogControl(hwnd, L"STATIC", L"RENAME DECK VAULT", SS_LEFT, 0, 18, 16, 360, 24, data->font);
+            CreateDialogControl(hwnd, L"STATIC", L"Name", SS_LEFT, 0, 18, 58, 80, 22, data->font);
+            data->name_edit = CreateDialogControl(
+                hwnd,
+                L"EDIT",
+                data->vault.name.c_str(),
+                WS_TABSTOP | ES_AUTOHSCROLL | WS_BORDER,
+                kVaultEditName,
+                104,
+                54,
+                310,
+                26,
+                data->font);
+            CreateDialogControl(hwnd, L"STATIC", L"Color", SS_LEFT, 0, 18, 98, 80, 22, data->font);
+            data->color_combo = CreateDialogControl(
+                hwnd,
+                L"COMBOBOX",
+                L"",
+                WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
+                kVaultEditColor,
+                104,
+                94,
+                160,
+                130,
+                data->font);
+            const wchar_t* colors[] = {L"green", L"yellow", L"red", L"mixed"};
+            for (const wchar_t* color : colors) {
+                SendMessageW(data->color_combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(color));
+            }
+            SendMessageW(data->color_combo, CB_SETCURSEL, ColorIndex(data->vault.color_theme), 0);
+
+            CreateDialogControl(
+                hwnd,
+                L"BUTTON",
+                L"SAVE",
+                WS_TABSTOP | BS_PUSHBUTTON,
+                kVaultEditSave,
+                214,
+                148,
+                92,
+                32,
+                data->font);
+            CreateDialogControl(
+                hwnd,
+                L"BUTTON",
+                L"CANCEL",
+                WS_TABSTOP | BS_PUSHBUTTON,
+                kVaultEditCancel,
+                322,
+                148,
+                92,
+                32,
+                data->font);
+            SetFocus(data->name_edit);
+            return 0;
+        }
+        case WM_CTLCOLORSTATIC:
+        case WM_CTLCOLOREDIT:
+        case WM_CTLCOLORLISTBOX: {
+            HDC dc = reinterpret_cast<HDC>(w_param);
+            SetBkColor(dc, RGB(0, 0, 0));
+            SetTextColor(dc, RGB(0, 255, 0));
+            return reinterpret_cast<LRESULT>(data != nullptr ? data->background : GetStockObject(BLACK_BRUSH));
+        }
+        case WM_COMMAND:
+            if (LOWORD(w_param) == kVaultEditSave && data != nullptr) {
+                data->vault.name = Trim(GetControlText(data->name_edit));
+                data->vault.color_theme = ColorFromIndex(static_cast<int>(SendMessageW(data->color_combo, CB_GETCURSEL, 0, 0)));
+                data->saved = true;
+                DestroyWindow(hwnd);
+                return 0;
+            }
+            if (LOWORD(w_param) == kVaultEditCancel) {
+                DestroyWindow(hwnd);
+                return 0;
+            }
+            break;
+        case WM_CLOSE:
+            DestroyWindow(hwnd);
+            return 0;
+        case WM_DESTROY:
+            if (data != nullptr) {
+                if (data->font != nullptr) {
+                    DeleteObject(data->font);
+                    data->font = nullptr;
+                }
+                if (data->background != nullptr) {
+                    DeleteObject(data->background);
+                    data->background = nullptr;
+                }
+            }
+            return 0;
+        default:
+            break;
+    }
+
+    return DefWindowProcW(hwnd, message, w_param, l_param);
+}
+
+std::optional<deck::BookmarkVault> ShowVaultEditDialog(HWND owner, deck::BookmarkVault vault) {
+    HINSTANCE instance = reinterpret_cast<HINSTANCE>(GetModuleHandleW(nullptr));
+    WNDCLASSEXW window_class{};
+    window_class.cbSize = sizeof(window_class);
+    window_class.lpfnWndProc = VaultEditDialogProc;
+    window_class.hInstance = instance;
+    window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    window_class.lpszClassName = kVaultEditDialogClassName;
+    window_class.hbrBackground = reinterpret_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
+    RegisterClassExW(&window_class);
+
+    RECT owner_rect{0, 0, 0, 0};
+    if (owner != nullptr) {
+        GetWindowRect(owner, &owner_rect);
+    }
+    constexpr int width = 456;
+    constexpr int height = 232;
+    const int x = owner != nullptr ? owner_rect.left + ((owner_rect.right - owner_rect.left) - width) / 2 : CW_USEDEFAULT;
+    const int y = owner != nullptr ? owner_rect.top + ((owner_rect.bottom - owner_rect.top) - height) / 2 : CW_USEDEFAULT;
+
+    VaultEditDialogData data{.vault = std::move(vault)};
+    HWND dialog = CreateWindowExW(
+        WS_EX_DLGMODALFRAME,
+        kVaultEditDialogClassName,
+        L"CyberDeck Vault",
+        WS_POPUP | WS_CAPTION | WS_SYSMENU,
+        x,
+        y,
+        width,
+        height,
+        owner,
+        nullptr,
+        instance,
+        &data);
+    if (dialog == nullptr) {
+        return std::nullopt;
+    }
+
+    if (owner != nullptr) {
+        EnableWindow(owner, FALSE);
+    }
+    ShowWindow(dialog, SW_SHOW);
+    UpdateWindow(dialog);
+
+    MSG message{};
+    while (IsWindow(dialog) && GetMessageW(&message, nullptr, 0, 0) > 0) {
+        if (!IsDialogMessageW(dialog, &message)) {
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
+    }
+
+    if (owner != nullptr) {
+        EnableWindow(owner, TRUE);
+        SetForegroundWindow(owner);
+    }
+    return data.saved ? std::optional<deck::BookmarkVault>{data.vault} : std::nullopt;
+}
+
 }  // namespace
 
 Application::Application(HINSTANCE instance, int show_command, std::wstring initial_url)
     : instance_(instance), show_command_(show_command), initial_url_(std::move(initial_url)) {}
+
+Application::~Application() {
+    deck_space_.Shutdown();
+    browser_host_.Shutdown();
+}
 
 void Application::PersistSettings() {
     if (!settings_store_.Save(current_settings_)) {
@@ -478,6 +703,10 @@ std::vector<deck::BookmarkNode> Application::LoadBookmarksWithFavicons() {
     return nodes;
 }
 
+void Application::RefreshDeckSpaceBookmarks() {
+    deck_space_.SetBookmarkData(LoadBookmarksWithFavicons(), bookmark_store_.LoadVaults());
+}
+
 void Application::AddNodeFromCurrentTab() {
     const std::vector<browser::BrowserTabState> tabs = browser_host_.Tabs();
     const browser::BrowserTabState* active_tab = ActiveBrowserTab(tabs, browser_host_.ActiveTabId());
@@ -521,6 +750,9 @@ void Application::AddNodeFromCurrentTab() {
         return;
     }
     created.node.color_theme = deck::BookmarkNodeColorTheme::Mixed;
+    if (const auto active_vault_id = deck_space_.ActiveVaultId()) {
+        created.node.vault_id = *active_vault_id;
+    }
     EnsureNodeFavicon(created.node);
 
     auto duplicate = std::find_if(current_nodes.begin(), current_nodes.end(), [&created](const deck::BookmarkNode& node) {
@@ -550,7 +782,7 @@ void Application::AddNodeFromCurrentTab() {
             updated.updated_utc = now;
             if (bookmark_store_.UpdateBookmark(std::move(updated))) {
                 logger_.Info("Updated existing Deck Node title from active tab.");
-                deck_space_.SetBookmarkNodes(LoadBookmarksWithFavicons());
+                RefreshDeckSpaceBookmarks();
                 main_window_.SetDownloadStatus(L"NODE UPDATED IN DECK");
             } else {
                 logger_.Error("Failed to update existing Deck Node.");
@@ -567,7 +799,7 @@ void Application::AddNodeFromCurrentTab() {
 
     if (bookmark_store_.AddBookmark(std::move(created.node))) {
         logger_.Info("Added Deck Node from active tab.");
-        deck_space_.SetBookmarkNodes(LoadBookmarksWithFavicons());
+        RefreshDeckSpaceBookmarks();
         main_window_.SetDownloadStatus(L"NODE ADDED TO DECK");
         return;
     }
@@ -610,7 +842,7 @@ void Application::OpenDeckNode(deck::BookmarkNode node) {
     if (!bookmark_store_.UpdateBookmark(node)) {
         logger_.Error("Failed to update Deck Node visit metadata before opening.");
     }
-    deck_space_.SetBookmarkNodes(LoadBookmarksWithFavicons());
+    RefreshDeckSpaceBookmarks();
 
     if (!current_settings_.keep_deck_open_after_node_open) {
         deck_space_.Exit();
@@ -659,7 +891,7 @@ void Application::EditDeckNode(deck::BookmarkNode node) {
     }
 
     if (bookmark_store_.UpdateBookmark(std::move(updated))) {
-        deck_space_.SetBookmarkNodes(LoadBookmarksWithFavicons());
+        RefreshDeckSpaceBookmarks();
         main_window_.SetDownloadStatus(L"NODE UPDATED IN DECK");
         logger_.Info("Deck Node edited.");
     } else {
@@ -684,13 +916,71 @@ void Application::DeleteDeckNode(deck::BookmarkNode node) {
     }
 
     if (bookmark_store_.DeleteBookmark(node.id)) {
-        deck_space_.SetBookmarkNodes(LoadBookmarksWithFavicons());
+        RefreshDeckSpaceBookmarks();
         main_window_.SetDownloadStatus(L"NODE DELETED FROM DECK");
         logger_.Info("Deck Node deleted.");
     } else {
         main_window_.SetDownloadStatus(L"NODE DELETE FAILED");
         logger_.Error("Failed to delete Deck Node.");
         MessageBoxW(main_window_.hwnd(), L"CyberDeck could not delete that Node.", L"Delete Node", MB_OK | MB_ICONERROR);
+    }
+}
+
+void Application::EditDeckVault(deck::BookmarkVault vault) {
+    const auto edited = ShowVaultEditDialog(main_window_.hwnd(), std::move(vault));
+    if (!edited) {
+        main_window_.SetDownloadStatus(L"VAULT RENAME CANCELED");
+        return;
+    }
+
+    deck::BookmarkVault updated = *edited;
+    if (Trim(updated.name).empty()) {
+        MessageBoxW(main_window_.hwnd(), L"Vault name must not be empty.", L"Deck Vault", MB_OK | MB_ICONWARNING);
+        main_window_.SetDownloadStatus(L"VAULT RENAME BLOCKED");
+        return;
+    }
+
+    updated.updated_utc = deck::CurrentBookmarkNodeUtcTimestamp();
+    if (bookmark_store_.UpdateVault(std::move(updated))) {
+        RefreshDeckSpaceBookmarks();
+        main_window_.SetDownloadStatus(L"VAULT UPDATED");
+        logger_.Info("Deck Vault renamed.");
+    } else {
+        main_window_.SetDownloadStatus(L"VAULT UPDATE FAILED");
+        logger_.Error("Failed to persist edited Deck Vault.");
+        MessageBoxW(main_window_.hwnd(), L"CyberDeck could not save the edited Vault.", L"Deck Vault", MB_OK | MB_ICONERROR);
+    }
+}
+
+void Application::DeleteDeckVault(deck::BookmarkVault vault) {
+    std::size_t child_count = 0;
+    for (const deck::BookmarkNode& node : bookmark_store_.LoadBookmarks()) {
+        if (node.vault_id && *node.vault_id == vault.id) {
+            ++child_count;
+        }
+    }
+
+    const std::wstring prompt =
+        L"DELETE DECK VAULT\n\n" + vault.name + L"\n\nThis removes the Vault shell. " +
+        std::to_wstring(child_count) + L" Nodes will move to the next available Vault, or stay as loose Nodes if this is the last Vault.";
+    const int response = MessageBoxW(
+        main_window_.hwnd(),
+        prompt.c_str(),
+        L"Delete Vault",
+        MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
+    if (response != IDYES) {
+        main_window_.SetDownloadStatus(L"VAULT DELETE CANCELED");
+        return;
+    }
+
+    if (bookmark_store_.DeleteVault(vault.id)) {
+        RefreshDeckSpaceBookmarks();
+        main_window_.SetDownloadStatus(L"VAULT DELETED; NODES KEPT");
+        logger_.Info("Deck Vault deleted while keeping child Nodes.");
+    } else {
+        main_window_.SetDownloadStatus(L"VAULT DELETE FAILED");
+        logger_.Error("Failed to delete Deck Vault.");
+        MessageBoxW(main_window_.hwnd(), L"CyberDeck could not delete that Vault.", L"Delete Vault", MB_OK | MB_ICONERROR);
     }
 }
 
@@ -811,7 +1101,7 @@ int Application::Run() {
         .deck_space = [this, exit_deck_space](bool enabled) {
             if (enabled) {
                 deck_space_.SetLayoutMode(render::DeckLayoutModeFromString(NarrowAscii(current_settings_.deck_layout_mode)));
-                deck_space_.SetBookmarkNodes(LoadBookmarksWithFavicons());
+                RefreshDeckSpaceBookmarks();
                 if (deck_space_.Enter(main_window_.ContentBounds())) {
                     main_window_.SetDeckSpaceEnabled(true);
                     main_window_.SetDownloadStatus(L"DECK SPACE ACTIVE");
@@ -874,6 +1164,12 @@ int Application::Run() {
         });
         deck_space_.SetDeleteNodeCallback([this](deck::BookmarkNode node) {
             DeleteDeckNode(std::move(node));
+        });
+        deck_space_.SetEditVaultCallback([this](deck::BookmarkVault vault) {
+            EditDeckVault(std::move(vault));
+        });
+        deck_space_.SetDeleteVaultCallback([this](deck::BookmarkVault vault) {
+            DeleteDeckVault(std::move(vault));
         });
         deck_space_.SetLayoutChangedCallback([this](render::DeckLayoutMode mode) {
             current_settings_.deck_layout_mode = WideFromAscii(render::ToLayoutModeString(mode));

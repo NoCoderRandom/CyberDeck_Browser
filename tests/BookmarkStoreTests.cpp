@@ -12,6 +12,9 @@
 
 namespace {
 
+constexpr std::size_t kDefaultBookmarkCount = 19;
+constexpr std::size_t kDefaultVaultCount = 5;
+
 std::filesystem::path TestRoot() {
     return std::filesystem::temp_directory_path() /
            ("CyberDeckBookmarkStoreTests-" + std::to_string(cyberdeck::common::CurrentProcessId()));
@@ -38,6 +41,18 @@ bool HasBookmark(
     std::wstring_view url) {
     for (const cyberdeck::deck::BookmarkNode& node : nodes) {
         if (node.id == id && node.url == url) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool HasVault(
+    const std::vector<cyberdeck::deck::BookmarkVault>& vaults,
+    std::wstring_view id,
+    std::wstring_view name) {
+    for (const cyberdeck::deck::BookmarkVault& vault : vaults) {
+        if (vault.id == id && vault.name == name) {
             return true;
         }
     }
@@ -77,25 +92,63 @@ int main() {
         cyberdeck::deck::BookmarkStore store;
         passed = Expect(store.Initialize(bookmarks_path, logger), "Initialize should create a bookmark file.") && passed;
         const auto default_nodes = store.LoadBookmarks();
-        passed = Expect(default_nodes.size() == 4, "New bookmark file should start with default bookmarks.") && passed;
+        const auto default_vaults = store.LoadVaults();
+        passed = Expect(
+                     default_nodes.size() == kDefaultBookmarkCount,
+                     "New bookmark file should start with default bookmarks.") &&
+                 passed;
+        passed = Expect(
+                     default_vaults.size() == kDefaultVaultCount,
+                     "New bookmark file should start with default Vaults.") &&
+                 passed;
+        passed = Expect(HasVault(default_vaults, L"vault-search", L"Search Array"), "Default Vaults should include Search Array.") &&
+                 passed;
+        passed = Expect(HasVault(default_vaults, L"vault-ai", L"AI Core"), "Default Vaults should include AI Core.") && passed;
+        passed = Expect(HasVault(default_vaults, L"vault-news", L"News Wire"), "Default Vaults should include News Wire.") &&
+                 passed;
+        passed = Expect(HasVault(default_vaults, L"vault-code", L"Code Forge"), "Default Vaults should include Code Forge.") &&
+                 passed;
+        passed = Expect(HasVault(default_vaults, L"vault-media", L"Media Bay"), "Default Vaults should include Media Bay.") &&
+                 passed;
         passed = Expect(
                      HasBookmark(default_nodes, L"default-google", L"https://www.google.com"),
                      "Default bookmarks should include Google.") &&
+                 passed;
+        passed = Expect(
+                     HasBookmark(default_nodes, L"default-duckduckgo", L"https://duckduckgo.com"),
+                     "Default bookmarks should include DuckDuckGo.") &&
                  passed;
         passed = Expect(
                      HasBookmark(default_nodes, L"default-reddit", L"https://www.reddit.com"),
                      "Default bookmarks should include Reddit.") &&
                  passed;
         passed = Expect(
+                     HasBookmark(default_nodes, L"default-hacker-news", L"https://news.ycombinator.com"),
+                     "Default bookmarks should include Hacker News.") &&
+                 passed;
+        passed = Expect(
                      HasBookmark(default_nodes, L"default-github", L"https://github.com"),
                      "Default bookmarks should include GitHub.") &&
+                 passed;
+        passed = Expect(
+                     HasBookmark(default_nodes, L"default-mdn", L"https://developer.mozilla.org"),
+                     "Default bookmarks should include MDN Web Docs.") &&
                  passed;
         passed = Expect(
                      HasBookmark(default_nodes, L"default-chatgpt", L"https://chatgpt.com"),
                      "Default bookmarks should include ChatGPT.") &&
                  passed;
+        passed = Expect(
+                     HasBookmark(default_nodes, L"default-claude", L"https://claude.ai"),
+                     "Default bookmarks should include Claude.") &&
+                 passed;
+        passed = Expect(
+                     HasBookmark(default_nodes, L"default-youtube", L"https://www.youtube.com"),
+                     "Default bookmarks should include YouTube.") &&
+                 passed;
 
         auto node = TestNode(L"node-example", L"Example Domain", L"https://example.com");
+        node.vault_id = L"vault-search";
         passed = Expect(store.AddBookmark(node), "AddBookmark should persist a valid node.") && passed;
         passed = Expect(!store.AddBookmark(node), "AddBookmark should reject duplicate ids.") && passed;
 
@@ -112,13 +165,23 @@ int main() {
         node.updated_utc = "2026-04-29T04:10:00Z";
         node.tags = {L"daily", L"docs"};
         passed = Expect(store.UpdateBookmark(node), "UpdateBookmark should persist changes.") && passed;
+
+        auto vaults = store.LoadVaults();
+        vaults[0].name = L"Search Matrix";
+        vaults[0].updated_utc = "2026-04-29T04:11:00Z";
+        passed = Expect(store.UpdateVault(vaults[0]), "UpdateVault should persist a renamed Vault.") && passed;
     }
 
     {
         cyberdeck::deck::BookmarkStore store;
         passed = Expect(store.Initialize(bookmarks_path, logger), "Initialize should reload saved bookmarks.") && passed;
         const auto nodes = store.LoadBookmarks();
-        passed = Expect(nodes.size() == 5, "Saved bookmarks and defaults should survive restart.") && passed;
+        const auto vaults = store.LoadVaults();
+        passed = Expect(
+                     nodes.size() == kDefaultBookmarkCount + 1,
+                     "Saved bookmarks and defaults should survive restart.") &&
+                 passed;
+        passed = Expect(HasVault(vaults, L"vault-search", L"Search Matrix"), "Renamed Vault should survive restart.") && passed;
         const auto updated_node = store.FindBookmarkById(L"node-example");
         passed = Expect(updated_node.has_value(), "Updated bookmark should survive restart.") && passed;
         if (updated_node) {
@@ -150,8 +213,12 @@ int main() {
         }
 
         passed = Expect(store.DeleteBookmark(L"node-example"), "DeleteBookmark should persist removal.") && passed;
-        passed = Expect(store.LoadBookmarks().size() == 4, "Default bookmarks should remain after deleting one custom node.") &&
+        passed = Expect(
+                     store.LoadBookmarks().size() == kDefaultBookmarkCount,
+                     "Default bookmarks should remain after deleting one custom node.") &&
                  passed;
+        passed = Expect(store.DeleteVault(L"vault-media"), "DeleteVault should remove an empty default Vault.") && passed;
+        passed = Expect(store.LoadVaults().size() == 4, "Deleted Vault should not remain in storage.") && passed;
         passed = Expect(store.SaveBookmarks({}), "SaveBookmarks should allow the user to remove all bookmarks.") && passed;
     }
 
@@ -162,6 +229,7 @@ int main() {
                      store.LoadBookmarks().empty(),
                      "Default bookmarks should not reappear after the user saves an empty list.") &&
                  passed;
+        passed = Expect(store.LoadVaults().size() == 4, "User-deleted Vaults should not reappear after reload.") && passed;
     }
 
     {
@@ -174,7 +242,7 @@ int main() {
         cyberdeck::deck::BookmarkStore store;
         passed = Expect(store.Initialize(legacy_empty_path, logger), "Legacy empty storage should initialize.") && passed;
         passed = Expect(
-                     store.LoadBookmarks().size() == 4,
+                     store.LoadBookmarks().size() == kDefaultBookmarkCount,
                      "Legacy empty storage should receive default bookmarks once.") &&
                  passed;
         passed = Expect(store.SaveBookmarks({}), "Legacy defaults should be removable by saving an empty list.") && passed;

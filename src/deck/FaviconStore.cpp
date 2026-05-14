@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cwctype>
 #include <fstream>
 #include <optional>
 #include <sstream>

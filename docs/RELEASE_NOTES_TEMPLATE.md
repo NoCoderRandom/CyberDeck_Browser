@@ -7,6 +7,7 @@
 - Installer:
 - Commit or source snapshot:
 - CEF version:
+- CEF codec build flags:
 - Windows test version:
 
 ## Summary
@@ -56,6 +57,10 @@ QA performed:
 - [ ] Fresh install
 - [ ] Launch
 - [ ] HTTPS browsing
+- [ ] CEF runtime verifier
+- [ ] YouTube HTML5 codec report
+- [ ] YouTube video playback
+- [ ] Reddit video playback
 - [ ] URL normalization/search fallback
 - [ ] Tabs
 - [ ] Back/forward/reload

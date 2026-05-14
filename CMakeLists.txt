@@ -112,6 +112,7 @@ if(WIN32)
     target_link_libraries(CyberDeckBrowser
         PRIVATE
             CyberDeckCore
+            CyberDeckPlatform
             dwmapi
             gdi32
             ole32
@@ -130,10 +131,16 @@ if(WIN32)
         set(CYBERDECK_CEF_INCLUDE_DIR "${CYBERDECK_CEF_ROOT}/include")
         set(CYBERDECK_CEF_CMAKE_DIR "${CYBERDECK_CEF_ROOT}/cmake")
         set(CYBERDECK_CEF_WRAPPER_DIR "${CYBERDECK_CEF_ROOT}/libcef_dll")
+        set(CYBERDECK_CEF_ROOT_VALID FALSE)
 
-        if(EXISTS "${CYBERDECK_CEF_INCLUDE_DIR}/cef_version.h"
+        if(IS_DIRECTORY "${CYBERDECK_CEF_ROOT}"
+            AND EXISTS "${CYBERDECK_CEF_INCLUDE_DIR}/cef_version.h"
             AND EXISTS "${CYBERDECK_CEF_CMAKE_DIR}/FindCEF.cmake"
             AND EXISTS "${CYBERDECK_CEF_WRAPPER_DIR}/CMakeLists.txt")
+            set(CYBERDECK_CEF_ROOT_VALID TRUE)
+        endif()
+
+        if(CYBERDECK_CEF_ROOT_VALID)
             if(MINGW)
                 if(CYBERDECK_REQUIRE_CEF)
                     message(FATAL_ERROR "Official Windows CEF binary distributions require MSVC-compatible builds. Reconfigure with Visual Studio 2022 or Ninja from an MSVC developer shell.")

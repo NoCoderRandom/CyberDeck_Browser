@@ -74,6 +74,14 @@ void DeckSpaceController::SetDeleteNodeCallback(std::function<void(BookmarkNode)
     view_.SetDeleteNodeCallback(std::move(callback));
 }
 
+void DeckSpaceController::SetEditVaultCallback(std::function<void(BookmarkVault)> callback) {
+    view_.SetEditVaultCallback(std::move(callback));
+}
+
+void DeckSpaceController::SetDeleteVaultCallback(std::function<void(BookmarkVault)> callback) {
+    view_.SetDeleteVaultCallback(std::move(callback));
+}
+
 void DeckSpaceController::SetLayoutChangedCallback(std::function<void(render::DeckLayoutMode)> callback) {
     view_.SetLayoutChangedCallback(std::move(callback));
 }
@@ -84,6 +92,10 @@ void DeckSpaceController::SetLayoutMode(render::DeckLayoutMode mode) {
 
 void DeckSpaceController::SetBookmarkNodes(std::vector<BookmarkNode> nodes) {
     view_.SetBookmarkNodes(std::move(nodes));
+}
+
+void DeckSpaceController::SetBookmarkData(std::vector<BookmarkNode> nodes, std::vector<BookmarkVault> vaults) {
+    view_.SetBookmarkData(std::move(nodes), std::move(vaults));
 }
 
 render::OpenGLDiagnostics DeckSpaceController::Diagnostics() const {
@@ -100,6 +112,10 @@ bool DeckSpaceController::available() const {
 
 std::wstring DeckSpaceController::LastError() const {
     return view_.LastError();
+}
+
+std::optional<std::wstring> DeckSpaceController::ActiveVaultId() const {
+    return view_.ActiveVaultId();
 }
 
 }  // namespace cyberdeck::deck

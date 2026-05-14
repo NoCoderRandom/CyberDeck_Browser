@@ -76,11 +76,21 @@ Terminal Mode is an opt-in visual mode that injects safe CSS into web pages wher
 
 ### Bookmark Node Storage
 
-Bookmark storage persists Nodes as local JSON. A Node represents a bookmark and stores fields such as title, URL, optional favicon or thumbnail metadata, tags, timestamps, and Deck Space layout data. Corrupted JSON must be handled safely with backup or recovery behavior rather than crashing.
+Bookmark storage persists Vaults and Nodes as local JSON. A Vault is a
+first-class bookmark container with stable metadata; a Node represents a
+bookmark and stores fields such as title, URL, optional Vault id, optional
+favicon or thumbnail metadata, tags, timestamps, and Deck Space layout data.
+Corrupted JSON must be handled safely with backup or recovery behavior rather
+than crashing.
 
 ### OpenGL Deck Space Renderer
 
-Deck Space renders bookmark Nodes as real 3D objects such as hex prisms, cubes, or tiles. It owns GPU resources, camera controls, picking, animation, neon materials, and layout modes. It opens URLs through the browser tab manager, but it does not render live websites as textures in v1.
+Deck Space renders Vaults and bookmark Nodes as real 3D objects such as hex
+prisms, cubes, or tiles. The Windows Vault Atlas presents the selected Vault in
+the center while also showing its slot on a larger outer orbit ring. The
+renderer owns GPU resources, camera controls, keyboard zoom, picking,
+animation, neon materials, and layout modes. It opens URLs through the browser
+tab manager, but it does not render live websites as textures in v1.
 
 ### Packaging
 

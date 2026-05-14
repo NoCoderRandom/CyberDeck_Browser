@@ -7,7 +7,7 @@ std::wstring_view AppName() {
 }
 
 std::wstring_view AppVersion() {
-    return L"0.1.0";
+    return L"0.1.0-rc3";
 }
 
 }  // namespace cyberdeck::common

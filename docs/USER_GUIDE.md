@@ -50,25 +50,39 @@ styles because modern pages often ship their own complex CSS.
 
 ## Deck Space
 
-Deck Space is the 3D bookmark system. Bookmarks are called Nodes.
-Fresh profiles start with default Nodes for Google, Reddit, GitHub, and ChatGPT.
+Deck Space is the 3D bookmark system. Bookmark groups are called Vaults and
+bookmarks are called Nodes. Fresh profiles start with five default Vaults:
+Search Array, AI Core, News Wire, Code Forge, and Media Bay. Those Vaults seed
+19 starter Nodes that users can edit, delete, or replace.
 
 1. Browse to a page.
 2. Wait for the real page title to appear.
 3. Press `ADD NODE`.
 4. Press `DECK`.
-5. Select Nodes with the mouse or left/right arrow keys.
-6. Press Enter or double-click to open the selected Node.
+5. Select a Vault with the mouse, mouse wheel, or left/right arrow keys.
+6. Press Enter or double-click to enter the selected Vault.
+7. Select Nodes with the mouse or left/right arrow keys.
+8. Press Enter or double-click to open the selected Node.
 
 Deck Space controls:
 
 - Drag mouse: orbit camera.
-- Mouse wheel: zoom.
-- Left/right arrows: select Nodes.
-- `L`: cycle layouts: Hex Ring, Cube Orbit, Grid Deck.
-- `E`: edit selected Node.
-- `Delete`: delete selected Node after confirmation.
+- Mouse wheel: rotate Vault/Node selection.
+- `+` / `-`: zoom in or out.
+- Left/right arrows: select Vaults or Nodes.
+- Enter/double click: enter a Vault or open a Node.
+- Right click, Backspace, or Escape: leave the active Vault and return to the
+  Vault Atlas.
+- `L`: cycle Node layouts inside Vaults: Hex Ring, Cube Orbit, Grid Deck.
+- `E`: rename the selected Vault or edit the selected Node.
+- `Delete`: delete the selected Vault or Node after confirmation. Deleting a
+  Vault keeps its Nodes by moving them to the next available Vault, or leaving
+  them loose if no Vaults remain.
 - `Esc` or `WEB`: return to the browser.
+
+In the Vault Atlas, the selected Vault is shown large in the center and also as
+a small marker in its slot on the outer circle. This makes it clear where the
+current Vault sits in the rotating Vault ring.
 
 ## Node Editing
 
@@ -92,9 +106,8 @@ Important files:
 - `favicons\`
 - `logs\cyberdeck.log`
 
-The portable package launcher redirects app-level data into its own
-`CyberdeckPortable\Data` folder. CEF internal profile/cache portability still
-needs a future source-level CEF settings change.
+The portable package launcher sets `CYBERDECK_APPDATA_DIR` so app data and the
+CEF profile/cache live in the portable package's `Data` folder.
 
 ## Diagnostics
 

@@ -48,9 +48,10 @@ covered separately in [README_LINUX.md](README_LINUX.md).
   Space projection.
 - Terminal Mode CSS injection for black/green/yellow/red cyberdeck styling.
 - CRT shell effects: scanlines, glow, and flicker controls.
-- Local history, settings, logs, and Deck Space Nodes stored as JSON.
-- Deck Space: 3D bookmark world with hex/cube/panel Nodes.
-- Fresh profiles start with default Nodes for Google, Reddit, GitHub, and ChatGPT.
+- Local history, settings, logs, Deck Space Vaults, and Nodes stored as JSON.
+- Deck Space: 3D bookmark world with Vaults and hex/cube/panel Nodes.
+- Fresh profiles start with five default Vaults and 19 starter Nodes.
+- Vault workflows: enter/leave, rename, delete, rotate, and keyboard zoom.
 - Node workflows: Add Node, select/open, edit, delete, layout switching.
 - OpenGL diagnostics for GPU vendor, renderer, and version.
 - Windows installer scaffolding through Inno Setup.
@@ -103,6 +104,18 @@ placeholder build.
 
 More details are in `docs/CEF_SETUP.md`.
 
+Security note:
+
+- Current Windows executable packaging keeps the CEF sandbox disabled until the
+  Windows bootstrap/sandbox-info launch path is wired. Do not treat this build
+  as a Chromium sandbox boundary yet.
+- `CYBERDECK_CEF_REMOTE_DEBUGGING_PORT` enables remote debugging and binds by
+  default to `127.0.0.1`.
+- `CYBERDECK_CEF_REMOTE_DEBUGGING_HOST` may set a custom debug bind host only when
+  `CYBERDECK_CEF_ALLOW_NONLOCAL_REMOTE_DEBUGGING=1`.
+- `-CefSha256` in `build_windows_release.ps1` or `-ExpectedSha256` in
+  `download_cef.ps1` pins trusted CEF archive checksums.
+
 Linux CEF install:
 
 ```bash
@@ -127,6 +140,13 @@ Release build helper:
 
 ```powershell
 .\scripts\build_release.ps1 -CefRoot "C:\path\to\cef_binary" -RequireCef
+```
+
+Full Windows release helper, including CEF download, CEF-required build,
+runtime verification, installer staging, and portable zip:
+
+```powershell
+.\scripts\build_windows_release.ps1 -SkipInstaller -CefSha256 "<trusted sha256>"
 ```
 
 Placeholder non-CEF build:
@@ -209,22 +229,23 @@ Inside the app:
 - `SCAN`, `GLOW`, and `FLK` adjust native CRT shell effects.
 - `SET` opens settings and diagnostics, including CEF state, data paths, render
   path, and log path.
-- In Deck Space, `Left`/`Right` selects Nodes, `Enter` opens, `Delete` removes,
-  and `L` cycles layout mode.
+- In Deck Space, `Left`/`Right` or the mouse wheel rotates Vaults/Nodes,
+  `Enter` opens the selected Vault or Node, `Backspace`/right click leaves a
+  Vault, `+`/`-` zooms, `Delete` removes after confirmation, and `L` cycles
+  Node layout mode.
 
 ## Packaging
 
 CyberDeck Browser uses Inno Setup for Windows installer packaging.
 
 ```powershell
-.\scripts\build_release.ps1 -CefRoot "C:\path\to\cef_binary" -RequireCef
-.\scripts\package_installer.ps1
+.\scripts\build_windows_release.ps1
 ```
 
 If Inno Setup is not on `PATH`, pass the compiler path:
 
 ```powershell
-.\scripts\package_installer.ps1 -IsccPath "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+.\scripts\build_windows_release.ps1 -IsccPath "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 ```
 
 To stage files without compiling the installer:
@@ -264,7 +285,7 @@ Important files and folders:
 
 - `settings.json` - theme, shell, and Deck Space preferences.
 - `history.json` - local navigation history.
-- `bookmarks.json` - Deck Space Nodes.
+- `bookmarks.json` - Deck Space Vaults and Nodes.
 - `favicons/` - local placeholder favicon assets for Nodes.
 - `logs/cyberdeck.log` - diagnostics log with size-based rotation.
 
@@ -283,9 +304,11 @@ Useful docs:
 - [CEF Setup](docs/CEF_SETUP.md)
 - [Linux Install Guide](README_LINUX.md)
 - [Linux Support Notes](docs/LINUX.md)
+- [Windows Media Playback](docs/WINDOWS_MEDIA.md)
 - [Packaging](docs/PACKAGING.md)
 - [Promo Media](docs/MEDIA.md)
 - [QA Checklist](docs/QA_CHECKLIST.md)
+- [v0.1.0-rc3 Release Notes](docs/RELEASE_NOTES_v0.1.0-rc3.md)
 
 ## Known Limitations
 
@@ -296,6 +319,8 @@ Useful docs:
 - Real favicon capture from CEF is not implemented yet; Deck Space currently
   uses local placeholder favicon badges.
 - Deck Space thumbnails are not implemented.
+- Reddit and some YouTube video playback require a Windows CEF build with
+  H.264/AAC codec support and the related licensing cleared.
 - Installer compilation requires Inno Setup 6 on the packaging machine.
 - The installer is not signed and there is no auto-update channel.
 - No clean Windows VM install/uninstall pass has been completed in this

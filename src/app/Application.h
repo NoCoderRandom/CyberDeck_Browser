@@ -18,6 +18,7 @@ namespace cyberdeck::app {
 class Application {
 public:
     Application(HINSTANCE instance, int show_command, std::wstring initial_url = {});
+    ~Application();
     Application(const Application&) = delete;
     Application& operator=(const Application&) = delete;
 
@@ -27,11 +28,14 @@ private:
     void PersistSettings();
     void ShowSettingsPanel() const;
     std::vector<deck::BookmarkNode> LoadBookmarksWithFavicons();
+    void RefreshDeckSpaceBookmarks();
     void AddNodeFromCurrentTab();
     void EnsureNodeFavicon(deck::BookmarkNode& node);
     void OpenDeckNode(deck::BookmarkNode node);
     void EditDeckNode(deck::BookmarkNode node);
     void DeleteDeckNode(deck::BookmarkNode node);
+    void EditDeckVault(deck::BookmarkVault vault);
+    void DeleteDeckVault(deck::BookmarkVault vault);
 
     HINSTANCE instance_ = nullptr;
     int show_command_ = SW_SHOWDEFAULT;

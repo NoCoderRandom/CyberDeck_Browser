@@ -21,8 +21,12 @@ namespace {
 constexpr wchar_t kDeckViewClassName[] = L"CyberDeckOpenGLDeckView";
 constexpr UINT_PTR kAnimationTimerId = 1;
 constexpr UINT kAnimationTimerMs = 16;
+constexpr float kPi = 3.14159265358979323846f;
+constexpr float kTau = kPi * 2.0f;
 constexpr float kMinimumZoom = 3.0f;
 constexpr float kMaximumZoom = 18.0f;
+constexpr float kDeckCameraDistance = 7.6f;
+constexpr float kVaultAtlasCameraDistance = 11.0f;
 constexpr float kMinimumPitch = -70.0f;
 constexpr float kMaximumPitch = 78.0f;
 constexpr float kMaximumAnimationDeltaSeconds = 0.1f;
@@ -182,15 +186,33 @@ NeonMaterialId MaterialFromNode(deck::BookmarkNodeColorTheme color_theme, std::s
     return NeonMaterialId::NeonGreen;
 }
 
+DeckShape ShapeFromVault(deck::BookmarkNodeColorTheme color_theme) {
+    switch (color_theme) {
+        case deck::BookmarkNodeColorTheme::Green:
+            return DeckShape::HexPrism;
+        case deck::BookmarkNodeColorTheme::Yellow:
+            return DeckShape::Cube;
+        case deck::BookmarkNodeColorTheme::Red:
+            return DeckShape::BeveledTile;
+        case deck::BookmarkNodeColorTheme::Mixed:
+            return DeckShape::Cube;
+    }
+    return DeckShape::HexPrism;
+}
+
+bool NodeInVault(const deck::BookmarkNode& node, const std::wstring& vault_id) {
+    return node.vault_id && *node.vault_id == vault_id;
+}
+
 Vec3 RotateX(Vec3 value, float degrees) {
-    const float radians = degrees * 3.14159265358979323846f / 180.0f;
+    const float radians = degrees * kPi / 180.0f;
     const float cosine = std::cos(radians);
     const float sine = std::sin(radians);
     return {value.x, value.y * cosine - value.z * sine, value.y * sine + value.z * cosine};
 }
 
 Vec3 RotateY(Vec3 value, float degrees) {
-    const float radians = degrees * 3.14159265358979323846f / 180.0f;
+    const float radians = degrees * kPi / 180.0f;
     const float cosine = std::cos(radians);
     const float sine = std::sin(radians);
     return {value.x * cosine + value.z * sine, value.y, -value.x * sine + value.z * cosine};
@@ -233,6 +255,49 @@ void DrawGrid() {
         glVertex3f(-12.0f, -1.45f, static_cast<float>(line));
         glVertex3f(12.0f, -1.45f, static_cast<float>(line));
     }
+    glEnd();
+}
+
+float VaultOrbitRadius(std::size_t vault_count) {
+    return vault_count <= 1 ? 0.0f : std::clamp(5.7f + static_cast<float>(vault_count) * 0.34f, 6.8f, 9.0f);
+}
+
+float VaultOrbitAngle(std::size_t index, std::size_t vault_count) {
+    if (vault_count == 0) {
+        return kPi * 0.5f;
+    }
+    return kPi * 0.5f + (static_cast<float>(index) / static_cast<float>(vault_count)) * kTau;
+}
+
+Vec3 VaultOrbitPosition(std::size_t index, std::size_t vault_count, float radius) {
+    const float angle = VaultOrbitAngle(index, vault_count);
+    return {
+        std::cos(angle) * radius,
+        -0.08f + static_cast<float>(index % 3) * 0.11f,
+        std::sin(angle) * radius - 0.15f,
+    };
+}
+
+void DrawVaultOrbitGuide(float radius, std::size_t selected_index, std::size_t vault_count) {
+    if (radius <= 0.0f || vault_count <= 1) {
+        return;
+    }
+
+    glLineWidth(1.5f);
+    ApplyMaterial(NeonMaterialId::DimInactiveGreen, 0.72f, 0.42f);
+    glBegin(GL_LINE_LOOP);
+    for (int segment = 0; segment < 112; ++segment) {
+        const float angle = static_cast<float>(segment) / 112.0f * kTau;
+        glVertex3f(std::cos(angle) * radius, -0.22f, std::sin(angle) * radius - 0.15f);
+    }
+    glEnd();
+
+    const Vec3 slot = VaultOrbitPosition(selected_index, vault_count, radius);
+    ApplyMaterial(NeonMaterialId::YellowHighlight, 0.86f, 0.52f);
+    glLineWidth(2.0f);
+    glBegin(GL_LINES);
+    glVertex3f(0.0f, 0.16f, 1.05f);
+    glVertex3f(slot.x, slot.y + 0.1f, slot.z);
     glEnd();
 }
 
@@ -321,27 +386,18 @@ void OpenGLDeckView::Resize(const RECT& bounds) {
 }
 
 void OpenGLDeckView::Shutdown() {
-    StopAnimation();
-    DestroyNeonShader();
-    DestroyOverlayFont();
-
-    if (context_ != nullptr) {
-        wglMakeCurrent(nullptr, nullptr);
-        wglDeleteContext(context_);
-        context_ = nullptr;
-    }
-
-    if (dc_ != nullptr && hwnd_ != nullptr) {
-        ReleaseDC(hwnd_, dc_);
-        dc_ = nullptr;
-    }
+    ReleaseGraphicsResources();
 
     if (hwnd_ != nullptr) {
         HWND window = hwnd_;
-        hwnd_ = nullptr;
-        DestroyWindow(window);
+        if (IsWindow(window)) {
+            DestroyWindow(window);
+        } else {
+            hwnd_ = nullptr;
+        }
     }
 
+    parent_ = nullptr;
     initialized_ = false;
 }
 
@@ -365,6 +421,14 @@ void OpenGLDeckView::SetDeleteNodeCallback(std::function<void(deck::BookmarkNode
     delete_node_callback_ = std::move(callback);
 }
 
+void OpenGLDeckView::SetEditVaultCallback(std::function<void(deck::BookmarkVault)> callback) {
+    edit_vault_callback_ = std::move(callback);
+}
+
+void OpenGLDeckView::SetDeleteVaultCallback(std::function<void(deck::BookmarkVault)> callback) {
+    delete_vault_callback_ = std::move(callback);
+}
+
 void OpenGLDeckView::SetLayoutChangedCallback(std::function<void(DeckLayoutMode)> callback) {
     layout_changed_callback_ = std::move(callback);
 }
@@ -383,10 +447,29 @@ void OpenGLDeckView::SetLayoutMode(DeckLayoutMode mode) {
 }
 
 void OpenGLDeckView::SetBookmarkNodes(std::vector<deck::BookmarkNode> nodes) {
+    SetBookmarkData(std::move(nodes), {});
+}
+
+void OpenGLDeckView::SetBookmarkData(std::vector<deck::BookmarkNode> nodes, std::vector<deck::BookmarkVault> vaults) {
+    const bool first_bookmark_load = !bookmark_nodes_loaded_;
     bookmark_nodes_ = std::move(nodes);
+    bookmark_vaults_ = std::move(vaults);
     bookmark_nodes_loaded_ = true;
     selected_node_index_ = 0;
+    selected_vault_index_ = 0;
     hovered_node_index_.reset();
+    if (active_vault_id_) {
+        const auto active = std::find_if(bookmark_vaults_.begin(), bookmark_vaults_.end(), [this](const deck::BookmarkVault& vault) {
+            return vault.id == *active_vault_id_;
+        });
+        if (active == bookmark_vaults_.end()) {
+            active_vault_id_.reset();
+        }
+    }
+    if (first_bookmark_load) {
+        target_distance_ = DefaultCameraDistance();
+        current_distance_ = target_distance_;
+    }
     if (initialized_) {
         RebuildSceneObjects();
         Render();
@@ -395,6 +478,10 @@ void OpenGLDeckView::SetBookmarkNodes(std::vector<deck::BookmarkNode> nodes) {
 
 std::wstring OpenGLDeckView::LastError() const {
     return last_error_;
+}
+
+std::optional<std::wstring> OpenGLDeckView::ActiveVaultId() const {
+    return active_vault_id_;
 }
 
 OpenGLDiagnostics OpenGLDeckView::Diagnostics() const {
@@ -478,26 +565,46 @@ LRESULT OpenGLDeckView::HandleMessage(UINT message, WPARAM w_param, LPARAM l_par
             break;
         case WM_MOUSEWHEEL: {
             const int wheel_delta = GET_WHEEL_DELTA_WPARAM(w_param);
-            target_distance_ = std::clamp(target_distance_ - static_cast<float>(wheel_delta) / WHEEL_DELTA * 0.8f, kMinimumZoom, kMaximumZoom);
+            if ((!bookmark_vaults_.empty() && !active_vault_id_) || !displayed_node_indices_.empty()) {
+                MoveSelection(wheel_delta > 0 ? -1 : 1);
+            } else {
+                target_distance_ =
+                    std::clamp(target_distance_ - static_cast<float>(wheel_delta) / WHEEL_DELTA * 0.8f, kMinimumZoom, kMaximumZoom);
+            }
             StartAnimation();
             return 0;
         }
+        case WM_RBUTTONUP:
+            if (active_vault_id_) {
+                ExitActiveVault();
+                return 0;
+            }
+            break;
         case WM_KEYDOWN:
             switch (w_param) {
                 case VK_ESCAPE:
+                    if (active_vault_id_) {
+                        ExitActiveVault();
+                        return 0;
+                    }
                     if (exit_requested_callback_) {
                         exit_requested_callback_();
                     }
                     return 0;
+                case VK_BACK:
+                    if (active_vault_id_) {
+                        ExitActiveVault();
+                    }
+                    return 0;
                 case VK_LEFT:
-                    if (!bookmark_nodes_.empty()) {
+                    if (!bookmark_nodes_.empty() || !bookmark_vaults_.empty()) {
                         MoveSelection(-1);
                         return 0;
                     }
                     target_yaw_degrees_ -= 8.0f;
                     break;
                 case VK_RIGHT:
-                    if (!bookmark_nodes_.empty()) {
+                    if (!bookmark_nodes_.empty() || !bookmark_vaults_.empty()) {
                         MoveSelection(1);
                         return 0;
                     }
@@ -509,6 +616,14 @@ LRESULT OpenGLDeckView::HandleMessage(UINT message, WPARAM w_param, LPARAM l_par
                 case VK_DOWN:
                     target_pitch_degrees_ = std::clamp(target_pitch_degrees_ + 5.0f, kMinimumPitch, kMaximumPitch);
                     break;
+                case VK_ADD:
+                case VK_OEM_PLUS:
+                    AdjustZoom(-0.75f);
+                    return 0;
+                case VK_SUBTRACT:
+                case VK_OEM_MINUS:
+                    AdjustZoom(0.75f);
+                    return 0;
                 case 'W':
                     target_pan_z_ -= 0.35f;
                     break;
@@ -566,7 +681,16 @@ LRESULT OpenGLDeckView::HandleMessage(UINT message, WPARAM w_param, LPARAM l_par
             EndPaint(hwnd_, &paint);
             return 0;
         }
+        case WM_DESTROY:
+            ReleaseGraphicsResources();
+            return 0;
         case WM_NCDESTROY:
+            if (hwnd_ != nullptr) {
+                SetWindowLongPtrW(hwnd_, GWLP_USERDATA, 0);
+            }
+            hwnd_ = nullptr;
+            parent_ = nullptr;
+            initialized_ = false;
             return 0;
         default:
             break;
@@ -639,13 +763,39 @@ bool OpenGLDeckView::InitializeContext() {
     return true;
 }
 
+void OpenGLDeckView::ReleaseGraphicsResources() {
+    StopAnimation();
+
+    if (dragging_ && GetCapture() == hwnd_) {
+        ReleaseCapture();
+    }
+    dragging_ = false;
+    drag_moved_ = false;
+
+    DestroyNeonShader();
+    DestroyOverlayFont();
+
+    if (context_ != nullptr) {
+        wglMakeCurrent(nullptr, nullptr);
+        wglDeleteContext(context_);
+        context_ = nullptr;
+    }
+
+    if (dc_ != nullptr && hwnd_ != nullptr) {
+        ReleaseDC(hwnd_, dc_);
+        dc_ = nullptr;
+    }
+
+    initialized_ = false;
+}
+
 void OpenGLDeckView::CreateOverlayFont() {
     if (dc_ == nullptr || font_base_ != 0) {
         return;
     }
 
     overlay_font_ = CreateFontW(
-        -16,
+        -21,
         0,
         0,
         0,
@@ -661,7 +811,7 @@ void OpenGLDeckView::CreateOverlayFont() {
         L"Cascadia Mono");
     if (overlay_font_ == nullptr) {
         overlay_font_ = CreateFontW(
-            -16,
+            -21,
             0,
             0,
             0,
@@ -831,23 +981,57 @@ void OpenGLDeckView::RebuildSceneObjects() {
     bookmark_labels_.clear();
     bookmark_urls_.clear();
     bookmark_favicon_labels_.clear();
-    if (bookmark_nodes_.empty()) {
+
+    if (!bookmark_vaults_.empty() && !active_vault_id_) {
+        BuildVaultScene();
+        return;
+    }
+
+    std::vector<std::size_t> node_indices;
+    if (active_vault_id_) {
+        for (std::size_t index = 0; index < bookmark_nodes_.size(); ++index) {
+            if (NodeInVault(bookmark_nodes_[index], *active_vault_id_)) {
+                node_indices.push_back(index);
+            }
+        }
+    } else {
+        node_indices.reserve(bookmark_nodes_.size());
+        for (std::size_t index = 0; index < bookmark_nodes_.size(); ++index) {
+            node_indices.push_back(index);
+        }
+    }
+
+    BuildNodeScene(node_indices);
+}
+
+void OpenGLDeckView::BuildNodeScene(const std::vector<std::size_t>& node_indices) {
+    displayed_node_indices_ = node_indices;
+    if (displayed_node_indices_.empty()) {
         if (logger_ != nullptr) {
-            logger_->Info("Deck bookmark scene ready: no saved Nodes.");
+            logger_->Info(active_vault_id_ ? "Deck Vault scene ready: no saved Nodes." : "Deck bookmark scene ready: no saved Nodes.");
         }
         return;
     }
 
-    const std::vector<DeckLayoutItem> layout = BuildDeckLayout(layout_mode_, bookmark_nodes_.size());
-    if (selected_node_index_ >= bookmark_nodes_.size()) {
-        selected_node_index_ = 0;
+    if (std::find(displayed_node_indices_.begin(), displayed_node_indices_.end(), selected_node_index_) ==
+        displayed_node_indices_.end()) {
+        selected_node_index_ = displayed_node_indices_.front();
     }
-    for (std::size_t index = 0; index < bookmark_nodes_.size(); ++index) {
-        const deck::BookmarkNode& node = bookmark_nodes_[index];
-        const std::size_t layout_index = (index + bookmark_nodes_.size() - selected_node_index_) % bookmark_nodes_.size();
+
+    const auto selected_iterator = std::find(displayed_node_indices_.begin(), displayed_node_indices_.end(), selected_node_index_);
+    const std::size_t selected_display_index =
+        selected_iterator == displayed_node_indices_.end()
+            ? 0
+            : static_cast<std::size_t>(std::distance(displayed_node_indices_.begin(), selected_iterator));
+    const std::vector<DeckLayoutItem> layout = BuildDeckLayout(layout_mode_, displayed_node_indices_.size());
+    for (std::size_t display_index = 0; display_index < displayed_node_indices_.size(); ++display_index) {
+        const std::size_t node_index = displayed_node_indices_[display_index];
+        const deck::BookmarkNode& node = bookmark_nodes_[node_index];
+        const std::size_t layout_index =
+            (display_index + displayed_node_indices_.size() - selected_display_index) % displayed_node_indices_.size();
         const DeckLayoutItem& item = layout[layout_index];
-        const bool selected = index == selected_node_index_;
-        const bool hovered = hovered_node_index_ && *hovered_node_index_ == index;
+        const bool selected = node_index == selected_node_index_;
+        const bool hovered = hovered_node_index_ && *hovered_node_index_ == display_index;
         Vec3 position = item.position;
         if (node.deck_position) {
             position = Vec3{node.deck_position->x, node.deck_position->y, node.deck_position->z};
@@ -866,16 +1050,16 @@ void OpenGLDeckView::RebuildSceneObjects() {
                 .rotation_degrees = item.rotation_degrees,
                 .scale = selected ? item.scale : Vec3{item.scale.x * 0.88f, item.scale.y * 0.88f, item.scale.z * 0.88f},
             },
-            .material = MaterialFromNode(node.color_theme, index),
+            .material = MaterialFromNode(node.color_theme, node_index),
             .hovered = hovered,
             .selected = selected,
             .animation = {
                 .enabled = bookmark_nodes_.size() <= 100,
                 .speed_scale = 1.0f,
-                .idle_rotation_degrees_per_second = selected ? 7.0f : (index % 2 == 0 ? 3.0f : -2.5f),
+                .idle_rotation_degrees_per_second = selected ? 7.0f : (display_index % 2 == 0 ? 3.0f : -2.5f),
                 .orbit_radius = selected ? 0.06f : 0.018f,
-                .orbit_degrees_per_second = index % 2 == 0 ? 2.0f : -1.6f,
-                .orbit_phase_degrees = static_cast<float>((index * 47) % 360),
+                .orbit_degrees_per_second = display_index % 2 == 0 ? 2.0f : -1.6f,
+                .orbit_phase_degrees = static_cast<float>((display_index * 47) % 360),
                 .transition_response = 6.5f,
                 .hover_pulse_hz = 0.65f,
                 .hover_pulse_scale = 0.02f,
@@ -894,7 +1078,108 @@ void OpenGLDeckView::RebuildSceneObjects() {
     }
 
     if (logger_ != nullptr) {
-        logger_->Info("Deck bookmark scene ready: nodes=" + std::to_string(bookmark_nodes_.size()) + ".");
+        logger_->Info("Deck bookmark scene ready: nodes=" + std::to_string(displayed_node_indices_.size()) + ".");
+    }
+}
+
+void OpenGLDeckView::BuildVaultScene() {
+    displayed_node_indices_.clear();
+    if (selected_vault_index_ >= bookmark_vaults_.size()) {
+        selected_vault_index_ = 0;
+    }
+
+    const std::size_t vault_count = bookmark_vaults_.size();
+    const float vault_radius = VaultOrbitRadius(vault_count);
+    for (std::size_t index = 0; index < bookmark_vaults_.size(); ++index) {
+        const deck::BookmarkVault& vault = bookmark_vaults_[index];
+        const bool selected = index == selected_vault_index_;
+        const bool hovered = hovered_node_index_ && *hovered_node_index_ == index;
+        Vec3 position{0.0f, 0.44f, 1.05f};
+        Vec3 rotation{0.0f, 0.0f, 0.0f};
+        Vec3 scale{1.42f, 1.42f, 1.42f};
+        if (!selected && vault_count > 1) {
+            const float angle = VaultOrbitAngle(index, vault_count);
+            const float front_factor = (std::sin(angle) + 1.0f) * 0.5f;
+            const float orbit_scale = 0.72f + front_factor * 0.22f;
+            position = VaultOrbitPosition(index, vault_count, vault_radius);
+            rotation = {0.0f, -angle * 180.0f / kPi + 90.0f, 0.0f};
+            scale = {orbit_scale, orbit_scale, orbit_scale};
+        }
+        std::size_t child_count = 0;
+        for (const deck::BookmarkNode& node : bookmark_nodes_) {
+            if (NodeInVault(node, vault.id)) {
+                ++child_count;
+            }
+        }
+
+        debug_objects_.push_back({
+            .shape = ShapeFromVault(vault.color_theme),
+            .transform = {
+                .position = position,
+                .rotation_degrees = rotation,
+                .scale = scale,
+            },
+            .material = MaterialFromNode(vault.color_theme, index),
+            .hovered = hovered,
+            .selected = selected,
+            .animation = {
+                .enabled = true,
+                .speed_scale = 1.0f,
+                .idle_rotation_degrees_per_second = selected ? 12.0f : (index % 2 == 0 ? 5.0f : -4.0f),
+                .orbit_radius = selected ? 0.08f : 0.026f,
+                .orbit_degrees_per_second = index % 2 == 0 ? 3.0f : -2.4f,
+                .orbit_phase_degrees = static_cast<float>((index * 59) % 360),
+                .transition_response = 6.8f,
+                .hover_pulse_hz = 0.72f,
+                .hover_pulse_scale = 0.03f,
+                .selected_pulse_hz = 0.52f,
+                .selected_pulse_scale = 0.065f,
+            },
+            .animation_state = {},
+        });
+        bookmark_labels_.push_back(CompactLabel(vault.name));
+        bookmark_urls_.push_back(std::to_string(child_count) + " Nodes");
+        bookmark_favicon_labels_.push_back("[VAULT]");
+    }
+
+    if (vault_count > 1 && selected_vault_index_ < bookmark_vaults_.size()) {
+        const deck::BookmarkVault& selected_vault = bookmark_vaults_[selected_vault_index_];
+        const float angle = VaultOrbitAngle(selected_vault_index_, vault_count);
+        const float front_factor = (std::sin(angle) + 1.0f) * 0.5f;
+        const float marker_scale = 0.32f + front_factor * 0.08f;
+        debug_objects_.push_back({
+            .shape = ShapeFromVault(selected_vault.color_theme),
+            .transform = {
+                .position = VaultOrbitPosition(selected_vault_index_, vault_count, vault_radius),
+                .rotation_degrees = {0.0f, -angle * 180.0f / kPi + 90.0f, 0.0f},
+                .scale = {marker_scale, marker_scale, marker_scale},
+            },
+            .material = MaterialFromNode(selected_vault.color_theme, selected_vault_index_),
+            .hovered = false,
+            .selected = true,
+            .animation = {
+                .enabled = true,
+                .speed_scale = 1.0f,
+                .idle_rotation_degrees_per_second = 16.0f,
+                .orbit_radius = 0.035f,
+                .orbit_degrees_per_second = -4.2f,
+                .orbit_phase_degrees = static_cast<float>((selected_vault_index_ * 59 + 31) % 360),
+                .transition_response = 6.8f,
+                .hover_pulse_hz = 0.72f,
+                .hover_pulse_scale = 0.02f,
+                .selected_pulse_hz = 0.72f,
+                .selected_pulse_scale = 0.09f,
+            },
+            .animation_state = {},
+        });
+    }
+
+    for (DeckSceneObject& object : debug_objects_) {
+        InitializeDeckAnimation(object);
+    }
+
+    if (logger_ != nullptr) {
+        logger_->Info("Deck Vault overview ready: vaults=" + std::to_string(bookmark_vaults_.size()) + ".");
     }
 }
 
@@ -1121,6 +1406,9 @@ void OpenGLDeckView::Render() {
     BeginNeonShader();
     glLineWidth(1.0f);
     DrawGrid();
+    if (!bookmark_vaults_.empty() && !active_vault_id_) {
+        DrawVaultOrbitGuide(VaultOrbitRadius(bookmark_vaults_.size()), selected_vault_index_, bookmark_vaults_.size());
+    }
 
     for (const DeckSceneObject& object : debug_objects_) {
         RenderDeckObject(object);
@@ -1236,11 +1524,22 @@ std::optional<std::size_t> OpenGLDeckView::PickNodeAt(POINT point) const {
 }
 
 void OpenGLDeckView::SetSelectedNodeIndex(std::size_t index) {
-    if (bookmark_nodes_.empty() || index >= bookmark_nodes_.size()) {
+    if (!bookmark_vaults_.empty() && !active_vault_id_) {
+        if (index >= bookmark_vaults_.size()) {
+            return;
+        }
+        selected_vault_index_ = index;
+        RebuildSceneObjects();
+        StartAnimation();
+        Render();
         return;
     }
 
-    selected_node_index_ = index;
+    if (index >= displayed_node_indices_.size()) {
+        return;
+    }
+
+    selected_node_index_ = displayed_node_indices_[index];
     RebuildSceneObjects();
     StartAnimation();
     Render();
@@ -1250,7 +1549,7 @@ void OpenGLDeckView::SetHoveredNodeIndex(std::optional<std::size_t> index) {
     if (index == hovered_node_index_) {
         return;
     }
-    if (index && *index >= bookmark_nodes_.size()) {
+    if (index && *index >= debug_objects_.size()) {
         index.reset();
     }
 
@@ -1261,14 +1560,71 @@ void OpenGLDeckView::SetHoveredNodeIndex(std::optional<std::size_t> index) {
 }
 
 void OpenGLDeckView::MoveSelection(int direction) {
-    if (bookmark_nodes_.empty()) {
+    if (!bookmark_vaults_.empty() && !active_vault_id_) {
+        const int count = static_cast<int>(bookmark_vaults_.size());
+        if (count <= 0) {
+            return;
+        }
+        const int current = static_cast<int>(selected_vault_index_);
+        selected_vault_index_ = static_cast<std::size_t>((current + direction + count) % count);
+        RebuildSceneObjects();
+        StartAnimation();
+        Render();
         return;
     }
 
-    const int count = static_cast<int>(bookmark_nodes_.size());
-    const int current = static_cast<int>(selected_node_index_);
+    if (displayed_node_indices_.empty()) {
+        return;
+    }
+
+    const int count = static_cast<int>(displayed_node_indices_.size());
+    const auto found = std::find(displayed_node_indices_.begin(), displayed_node_indices_.end(), selected_node_index_);
+    const int current =
+        found == displayed_node_indices_.end() ? 0 : static_cast<int>(std::distance(displayed_node_indices_.begin(), found));
     const int next = (current + direction + count) % count;
-    SetSelectedNodeIndex(static_cast<std::size_t>(next));
+    selected_node_index_ = displayed_node_indices_[static_cast<std::size_t>(next)];
+    RebuildSceneObjects();
+    StartAnimation();
+    Render();
+}
+
+void OpenGLDeckView::EnterSelectedVault() {
+    if (bookmark_vaults_.empty() || selected_vault_index_ >= bookmark_vaults_.size()) {
+        return;
+    }
+
+    active_vault_id_ = bookmark_vaults_[selected_vault_index_].id;
+    hovered_node_index_.reset();
+    selected_node_index_ = 0;
+    target_yaw_degrees_ += 72.0f;
+    target_distance_ = DefaultCameraDistance();
+    RebuildSceneObjects();
+    if (!displayed_node_indices_.empty()) {
+        selected_node_index_ = displayed_node_indices_.front();
+        RebuildSceneObjects();
+    }
+    StartAnimation();
+    Render();
+    if (logger_ != nullptr) {
+        logger_->Info("Entered Deck Vault: " + NarrowForLog(bookmark_vaults_[selected_vault_index_].name) + ".");
+    }
+}
+
+void OpenGLDeckView::ExitActiveVault() {
+    if (!active_vault_id_) {
+        return;
+    }
+
+    active_vault_id_.reset();
+    hovered_node_index_.reset();
+    target_yaw_degrees_ -= 72.0f;
+    target_distance_ = DefaultCameraDistance();
+    RebuildSceneObjects();
+    StartAnimation();
+    Render();
+    if (logger_ != nullptr) {
+        logger_->Info("Returned to Deck Vault overview.");
+    }
 }
 
 void OpenGLDeckView::CycleLayoutMode() {
@@ -1285,6 +1641,10 @@ void OpenGLDeckView::CycleLayoutMode() {
 }
 
 void OpenGLDeckView::OpenSelectedNode() {
+    if (!bookmark_vaults_.empty() && !active_vault_id_) {
+        EnterSelectedVault();
+        return;
+    }
     if (selected_node_index_ >= bookmark_nodes_.size() || !open_node_callback_) {
         return;
     }
@@ -1293,6 +1653,12 @@ void OpenGLDeckView::OpenSelectedNode() {
 }
 
 void OpenGLDeckView::EditSelectedNode() {
+    if (!bookmark_vaults_.empty() && !active_vault_id_) {
+        if (selected_vault_index_ < bookmark_vaults_.size() && edit_vault_callback_) {
+            edit_vault_callback_(bookmark_vaults_[selected_vault_index_]);
+        }
+        return;
+    }
     if (selected_node_index_ >= bookmark_nodes_.size() || !edit_node_callback_) {
         return;
     }
@@ -1301,6 +1667,12 @@ void OpenGLDeckView::EditSelectedNode() {
 }
 
 void OpenGLDeckView::DeleteSelectedNode() {
+    if (!bookmark_vaults_.empty() && !active_vault_id_) {
+        if (selected_vault_index_ < bookmark_vaults_.size() && delete_vault_callback_) {
+            delete_vault_callback_(bookmark_vaults_[selected_vault_index_]);
+        }
+        return;
+    }
     if (selected_node_index_ >= bookmark_nodes_.size() || !delete_node_callback_) {
         return;
     }
@@ -1319,56 +1691,72 @@ void OpenGLDeckView::DrawHelpOverlay() {
     glLoadIdentity();
 
     glDisable(GL_DEPTH_TEST);
-    DrawOverlayText(font_base_, 14, 24, "DECK SPACE", 1.0f, 1.0f, 0.0f);
-    DrawOverlayText(font_base_, 14, 46, "Drag: orbit   Wheel: zoom   Esc: browser", 0.0f, 1.0f, 0.0f);
-    DrawOverlayText(font_base_, 14, 68, "Arrows: rotate   WASD: pan   R: reset   Enter: open Node later", 0.0f, 0.75f, 0.0f);
-    DrawOverlayText(font_base_, 14, 90, "Left click is reserved for future Node picking", 0.85f, 0.85f, 0.0f);
+    const bool in_vault_overview = !bookmark_vaults_.empty() && !active_vault_id_;
+    DrawOverlayText(font_base_, 16, 28, active_vault_id_ ? "DECK VAULT" : "DECK SPACE", 1.0f, 1.0f, 0.0f);
+    DrawOverlayText(font_base_, 16, 56, "Drag: orbit   Wheel/Arrows: rotate selection   +/-: zoom   R: reset", 0.0f, 1.0f, 0.0f);
+    DrawOverlayText(
+        font_base_,
+        16,
+        84,
+        active_vault_id_ ? "Enter: open Node   Right click/Backspace/Esc: leave Vault"
+                         : (in_vault_overview ? "Enter/double click: enter Vault   Esc: browser" : "Enter: open Node   Esc: browser"),
+        0.0f,
+        0.75f,
+        0.0f);
+    DrawOverlayText(font_base_, 16, 112, in_vault_overview ? "E: rename Vault   Del: delete Vault   L: switch inner layout" : "E: edit Node   Del: delete Node   L: switch layout", 0.85f, 0.85f, 0.0f);
     if (bookmark_nodes_loaded_ && bookmark_labels_.empty()) {
-        DrawOverlayText(font_base_, 14, std::max(116, height_ / 2 - 10), "NO NODES FOUND", 1.0f, 1.0f, 0.0f);
+        DrawOverlayText(font_base_, 16, std::max(144, height_ / 2 - 10), active_vault_id_ ? "VAULT EMPTY" : "NO NODES FOUND", 1.0f, 1.0f, 0.0f);
         DrawOverlayText(
             font_base_,
-            14,
-            std::max(138, height_ / 2 + 14),
-            "VISIT A SITE AND PRESS ADD NODE",
+            16,
+            std::max(172, height_ / 2 + 18),
+            active_vault_id_ ? "PRESS ADD NODE TO STORE THE ACTIVE SITE HERE" : "VISIT A SITE AND PRESS ADD NODE",
             0.0f,
             1.0f,
             0.0f);
     } else if (bookmark_labels_.empty()) {
-        DrawOverlayText(font_base_, 14, std::max(116, height_ - 36), "NODE LABEL PIPELINE: bitmap overlay ready", 1.0f, 1.0f, 0.0f);
-        DrawOverlayText(font_base_, 14, std::max(138, height_ - 16), "Test Node: Example Domain", 0.0f, 1.0f, 0.0f);
+        DrawOverlayText(font_base_, 16, std::max(144, height_ - 48), "NODE LABEL PIPELINE: bitmap overlay ready", 1.0f, 1.0f, 0.0f);
+        DrawOverlayText(font_base_, 16, std::max(172, height_ - 20), "Test Node: Example Domain", 0.0f, 1.0f, 0.0f);
     } else {
         DrawOverlayText(
             font_base_,
-            14,
-            std::max(116, height_ - 58),
-            std::string("LAYOUT ") + ToLayoutModeString(layout_mode_) + ": " + std::to_string(bookmark_labels_.size()) +
-                " NODES",
+            16,
+            std::max(144, height_ - 72),
+            in_vault_overview ? std::string("VAULT ATLAS: ") + std::to_string(bookmark_vaults_.size()) + " VAULTS"
+                              : std::string("LAYOUT ") + ToLayoutModeString(layout_mode_) + ": " +
+                                    std::to_string(displayed_node_indices_.size()) + " NODES",
             1.0f,
             1.0f,
             0.0f);
         const std::size_t label_count = std::min<std::size_t>(bookmark_labels_.size(), 3);
-        const int label_y = std::max(138, height_ - 76);
+        const int label_y = std::max(172, height_ - 96);
         for (std::size_t index = 0; index < label_count; ++index) {
             DrawOverlayText(
                 font_base_,
-                14,
-                label_y + static_cast<int>(index) * 20,
-                "Node: " + bookmark_labels_[index],
+                16,
+                label_y + static_cast<int>(index) * 26,
+                in_vault_overview ? "Vault: " + bookmark_labels_[index] : "Node: " + bookmark_labels_[index],
                 0.0f,
                 1.0f,
                 0.0f);
         }
-        const std::size_t info_index = hovered_node_index_.value_or(selected_node_index_);
-        if (info_index < bookmark_labels_.size() && info_index < bookmark_urls_.size()) {
-            DrawOverlayText(font_base_, 14, 116, "SELECTED NODE", 1.0f, 1.0f, 0.0f);
-            DrawOverlayText(font_base_, 14, 138, bookmark_labels_[info_index], 0.0f, 1.0f, 0.0f);
-            DrawOverlayText(font_base_, 14, 160, bookmark_urls_[info_index], 1.0f, 1.0f, 0.0f);
-            if (info_index < bookmark_favicon_labels_.size()) {
-                DrawOverlayText(font_base_, 14, 182, "IDENTITY " + bookmark_favicon_labels_[info_index] + " LOCAL SVG", 1.0f, 1.0f, 0.0f);
+        std::size_t info_index = hovered_node_index_.value_or(in_vault_overview ? selected_vault_index_ : 0);
+        if (!in_vault_overview) {
+            const auto selected_iterator = std::find(displayed_node_indices_.begin(), displayed_node_indices_.end(), selected_node_index_);
+            if (!hovered_node_index_ && selected_iterator != displayed_node_indices_.end()) {
+                info_index = static_cast<std::size_t>(std::distance(displayed_node_indices_.begin(), selected_iterator));
             }
-            DrawOverlayText(font_base_, 14, 204, "ACTIONS: OPEN Enter/double click   EDIT E   DELETE Del", 0.0f, 0.75f, 0.0f);
-            DrawOverlayText(font_base_, 14, 226, "DELETE REQUIRES CONFIRMATION", 1.0f, 0.0f, 0.0f);
-            DrawOverlayText(font_base_, 14, 248, "LAYOUT L: switch Hex Ring / Cube Orbit / Grid Deck", 0.0f, 0.75f, 0.0f);
+        }
+        if (info_index < bookmark_labels_.size() && info_index < bookmark_urls_.size()) {
+            DrawOverlayText(font_base_, 16, 144, in_vault_overview ? "SELECTED VAULT" : "SELECTED NODE", 1.0f, 1.0f, 0.0f);
+            DrawOverlayText(font_base_, 16, 172, bookmark_labels_[info_index], 0.0f, 1.0f, 0.0f);
+            DrawOverlayText(font_base_, 16, 200, bookmark_urls_[info_index], 1.0f, 1.0f, 0.0f);
+            if (info_index < bookmark_favicon_labels_.size()) {
+                DrawOverlayText(font_base_, 16, 228, "IDENTITY " + bookmark_favicon_labels_[info_index], 1.0f, 1.0f, 0.0f);
+            }
+            DrawOverlayText(font_base_, 16, 256, in_vault_overview ? "ACTIONS: ENTER Enter/double click   RENAME E   DELETE Del" : "ACTIONS: OPEN Enter/double click   EDIT E   DELETE Del", 0.0f, 0.75f, 0.0f);
+            DrawOverlayText(font_base_, 16, 284, in_vault_overview ? "DELETING A VAULT KEEPS ITS NODES AS LOOSE NODES" : "RIGHT CLICK OR BACKSPACE RETURNS TO VAULT ATLAS WHEN INSIDE A VAULT", 1.0f, 0.0f, 0.0f);
+            DrawOverlayText(font_base_, 16, 312, "LAYOUT L: switch Hex Ring / Cube Orbit / Grid Deck", 0.0f, 0.75f, 0.0f);
         }
     }
     glEnable(GL_DEPTH_TEST);
@@ -1392,9 +1780,19 @@ void OpenGLDeckView::SmoothCamera(float delta_seconds) {
 void OpenGLDeckView::ResetCamera() {
     target_yaw_degrees_ = 0.0f;
     target_pitch_degrees_ = 19.0f;
-    target_distance_ = 7.2f;
+    target_distance_ = DefaultCameraDistance();
     target_pan_x_ = 0.0f;
     target_pan_z_ = 0.0f;
+}
+
+void OpenGLDeckView::AdjustZoom(float delta_distance) {
+    target_distance_ = std::clamp(target_distance_ + delta_distance, kMinimumZoom, kMaximumZoom);
+    StartAnimation();
+    Render();
+}
+
+float OpenGLDeckView::DefaultCameraDistance() const {
+    return !bookmark_vaults_.empty() && !active_vault_id_ ? kVaultAtlasCameraDistance : kDeckCameraDistance;
 }
 
 void OpenGLDeckView::StartAnimation() {

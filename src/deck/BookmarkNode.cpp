@@ -603,6 +603,9 @@ BookmarkNodeValidationResult ValidateBookmarkNode(const BookmarkNode& node) {
     if (node.last_visited_utc && node.last_visited_utc->empty()) {
         return {.valid = false, .message = L"Node last visited timestamp must be null or non-empty."};
     }
+    if (node.vault_id && Trim(*node.vault_id).empty()) {
+        return {.valid = false, .message = L"Node Vault id must be null or non-empty."};
+    }
     if (node.visit_count < 0) {
         return {.valid = false, .message = L"Node visit count must not be negative."};
     }
@@ -654,6 +657,11 @@ std::string BookmarkNodeToJson(const BookmarkNode& node) {
     output << "  \"id\": \"" << EscapeJsonString(node.id) << "\",\n";
     output << "  \"title\": \"" << EscapeJsonString(node.title) << "\",\n";
     output << "  \"url\": \"" << EscapeJsonString(node.url) << "\",\n";
+    if (node.vault_id) {
+        output << "  \"vaultId\": \"" << EscapeJsonString(*node.vault_id) << "\",\n";
+    } else {
+        output << "  \"vaultId\": null,\n";
+    }
     if (node.favicon_path) {
         output << "  \"faviconPath\": \"" << EscapeJsonString(*node.favicon_path) << "\",\n";
     } else {
@@ -716,7 +724,8 @@ std::optional<BookmarkNode> BookmarkNodeFromJson(std::string_view json_text, std
         SetError(error_message, L"Bookmark Node JSON has missing or invalid required fields.");
         return std::nullopt;
     }
-    if (!OptionalStringFieldIsValid(*root, "faviconPath") || !OptionalStringFieldIsValid(*root, "lastVisitedUtc")) {
+    if (!OptionalStringFieldIsValid(*root, "vaultId") || !OptionalStringFieldIsValid(*root, "faviconPath") ||
+        !OptionalStringFieldIsValid(*root, "lastVisitedUtc")) {
         SetError(error_message, L"Bookmark Node JSON has an invalid optional string field.");
         return std::nullopt;
     }
@@ -732,6 +741,9 @@ std::optional<BookmarkNode> BookmarkNodeFromJson(std::string_view json_text, std
     node.id = Utf8ToWide(*id);
     node.title = Utf8ToWide(*title);
     node.url = Utf8ToWide(*url);
+    if (const std::optional<std::string> vault_id = OptionalStringField(*root, "vaultId")) {
+        node.vault_id = Utf8ToWide(*vault_id);
+    }
     if (const std::optional<std::string> favicon = OptionalStringField(*root, "faviconPath")) {
         node.favicon_path = Utf8ToWide(*favicon);
     }
