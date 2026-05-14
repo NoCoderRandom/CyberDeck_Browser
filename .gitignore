@@ -41,7 +41,16 @@ installer-output/
 .env
 .env.*
 
-# Local AI assistant state / memories. Keep the committed Promts/ material.
+# Local prompt/context and AI assistant files
+Promts/
+Prompts/
+prompts/
+prompt/
+Global Read For coder/
+Global_Read_For_Coder/
+.agents/
+.ai/
+.ai-cache/
 .codex
 .codex/
 .codex-*/
