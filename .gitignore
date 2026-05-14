@@ -62,6 +62,16 @@ Global_Read_For_Coder/
 *.ai-memory.*
 *.chat-session.*
 
+# Private security review artifacts. Keep GitHub's public SECURITY.md allowed.
+SECURITY_HANDOFF*.md
+SECURITY_*_FINDINGS.md
+SECURITY_*_FIX_GUIDE.md
+SECURITY_*_FIX_PLAN.md
+security_handoff*.md
+security_*_findings.md
+security_*_fix_guide.md
+security_*_fix_plan.md
+
 # Large third-party SDK drops should be documented and fetched/recreated.
 third_party/cef/
 third_party/cef-downloads/

@@ -102,19 +102,10 @@ Use Visual Studio 2022 or Ninja from an MSVC developer shell. Official Windows
 CEF binaries are not link-compatible with the MinGW toolchain used by the local
 placeholder build.
 
-More details are in `docs/CEF_SETUP.md`.
-
-Security note:
-
-- Current Windows executable packaging keeps the CEF sandbox disabled until the
-  Windows bootstrap/sandbox-info launch path is wired. Do not treat this build
-  as a Chromium sandbox boundary yet.
-- `CYBERDECK_CEF_REMOTE_DEBUGGING_PORT` enables remote debugging and binds by
-  default to `127.0.0.1`.
-- `CYBERDECK_CEF_REMOTE_DEBUGGING_HOST` may set a custom debug bind host only when
-  `CYBERDECK_CEF_ALLOW_NONLOCAL_REMOTE_DEBUGGING=1`.
-- `-CefSha256` in `build_windows_release.ps1` or `-ExpectedSha256` in
-  `download_cef.ps1` pins trusted CEF archive checksums.
+More details are in `docs/CEF_SETUP.md`. Validate Windows release builds against
+the packaging checklist before publication; CEF archive checksums can be pinned
+with `-CefSha256` in `build_windows_release.ps1` or `-ExpectedSha256` in
+`download_cef.ps1`.
 
 Linux CEF install:
 
